@@ -796,8 +796,10 @@ async function recheckBookingStatus() {
 }
 
 // Add these new refs and constants
-const POLLING_INTERVAL = 5000; // 5 seconds
-const MAX_POLLING_ATTEMPTS = 60; // 5 minutes total
+const INITIAL_POLLING_INTERVAL = 10000; // Start with 10 seconds
+const MAX_POLLING_INTERVAL = 30000; // Max 30 seconds
+const MAX_POLLING_ATTEMPTS = 36; // 12 minutes total with exponential backoff
+const BACKOFF_FACTOR = 1.5; // Increase interval by 50% each time
 const purchaseId = ref<string | null>(null);
 const pollingCount = ref(0);
 const pollingTimer = ref<NodeJS.Timeout | null>(null);
@@ -888,6 +890,16 @@ async function checkPaymentStatus() {
       // Payment failed or cancelled
       stopPolling();
       error.value = `Payment ${data.status}. Please try again.`;
+    } else {
+      // Payment still pending, update polling interval with exponential backoff
+      const currentInterval = Math.min(
+        INITIAL_POLLING_INTERVAL * Math.pow(BACKOFF_FACTOR, pollingCount.value - 1),
+        MAX_POLLING_INTERVAL
+      );
+      if (pollingTimer.value) {
+        clearInterval(pollingTimer.value);
+        pollingTimer.value = setInterval(checkPaymentStatus, currentInterval);
+      }
     }
   } catch (err: any) {
     console.error("Error checking payment status:", err);
@@ -904,7 +916,7 @@ function startPolling(chipPurchaseId: string) {
   stopPolling();
 
   // Start new polling
-  pollingTimer.value = setInterval(checkPaymentStatus, POLLING_INTERVAL);
+  pollingTimer.value = setInterval(checkPaymentStatus, INITIAL_POLLING_INTERVAL);
 }
 
 // Stop polling

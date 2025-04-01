@@ -1,6 +1,8 @@
 import { H3Event } from 'h3'
 
 const CHIP_SECRET_KEY = process.env.CHIP_SECRET_KEY
+const CACHE_DURATION = 30000 // 30 seconds cache
+const statusCache = new Map<string, { status: string; timestamp: number }>()
 
 export default defineEventHandler(async (event: H3Event) => {
   try {
@@ -12,6 +14,16 @@ export default defineEventHandler(async (event: H3Event) => {
         statusCode: 400,
         statusMessage: 'Purchase ID is required',
       })
+    }
+
+    // Check cache first
+    const cachedStatus = statusCache.get(purchaseId as string)
+    if (cachedStatus && Date.now() - cachedStatus.timestamp < CACHE_DURATION) {
+      return {
+        status: cachedStatus.status,
+        chipStatus: cachedStatus.status,
+        cached: true
+      }
     }
 
     // Call CHIP API to get payment status
@@ -38,10 +50,16 @@ export default defineEventHandler(async (event: H3Event) => {
       : data.status === 'cancelled' ? 'cancelled'
       : 'pending'
 
+    // Update cache
+    statusCache.set(purchaseId as string, {
+      status,
+      timestamp: Date.now()
+    })
+
     return {
       status,
       chipStatus: data.status,
-      purchase: data
+      cached: false
     }
   } catch (error: any) {
     throw createError({
