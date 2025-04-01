@@ -6,10 +6,10 @@ export const useSiteConfig = () => {
   const updateConfig = async () => {
     try {
       const response = await $apiFetch('/api/setting/get-landing-page')
-      const { title, logo_url, company_name } = response?.data || {}
+      const { title, logo_url, companyName } = response?.data || {}
       
       useHead({
-        title: company_name ? `Studio Raya 2025 - ${company_name}` : 'Studio Raya 2025',
+        title: companyName ? `Studio Raya 2025 - ${companyName}` : 'Studio Raya 2025',
         link: [
           {
             rel: 'icon',

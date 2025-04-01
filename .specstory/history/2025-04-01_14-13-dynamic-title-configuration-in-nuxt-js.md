@@ -539,6 +539,209 @@ The build error should now be resolved. The changes maintain the same functional
 
 ---
 
+_**User**_
+
+okau success, now please change title to 'Studio Raya 2025 -[company_name}, when not loading just Studio Raya 2025
+
+---
+
+_**Assistant**_
+
+I'll modify the code to show "Studio Raya 2025 - [company_name]" when loaded and "Studio Raya 2025" as the default/loading title.
+
+First, let's update the Nuxt config with the default title:
+
+
+---
+
+_****_
+
+```diff
+      head: {
+        titleTemplate: '%s',
+-       title: 'Loading...',
++       title: 'Studio Raya 2025',
+        meta: [
+          { charset: 'utf-8' },
+```
+
+---
+
+_****_
+
+Now, let's update the composable to format the title with the company name:
+
+
+---
+
+_****_
+
+```diff
+      try {
+        const response = await $apiFetch('/api/setting/get-landing-page')
+-       const { title, logo_url } = response?.data || {}
++       const { title, logo_url, company_name } = response?.data || {}
+        
+        useHead({
+-         title,
++         title: company_name ? `Studio Raya 2025 - ${company_name}` : 'Studio Raya 2025',
+          link: [
+            {
+```
+
+---
+
+_****_
+
+Let's commit and push these changes:
+
+
+
+---
+
+_****_
+
+```bash
+git add . && git commit -m "feat: update title format to include company name" && git push
+```
+
+```
+zahiruliman@Zahiruls-MacBook-Air studio-app-temp % git add . && git commit -m "feat: update title format to 
+include company name" && git push                  git add . && git commit -m "feat: update title format to 
+include company name" && git push
+[testing b14509e] feat: update title format to include company name
+ 3 files changed, 548 insertions(+), 3 deletions(-)
+ create mode 100644 .specstory/history/2025-04-01_14-13-dynamic-title-configuration-in-nuxt-js.md
+Enumerating objects: 14, done.
+Counting objects: 100% (14/14), done.
+Delta compression using up to 8 threads
+Compressing objects: 100% (7/7), done.
+Writing objects: 100% (8/8), 4.66 KiB | 4.66 MiB/s, done.
+Total 8 (delta 4), reused 0 (delta 0), pack-reused 0 (from 0)
+remote: Resolving deltas: 100% (4/4), completed with 4 local objects.
+To github.com:infyramy/studio-app-temp.git
+   bad5e4e..b14509e  testing -> testing
+zahiruliman@Zahiruls-MacBook-Air studio-app-temp %
+```
+
+---
+
+_****_
+
+I've made the following changes:
+
+1. Updated `nuxt.config.ts` to:
+   - Set the default title to "Studio Raya 2025" (shown while loading)
+
+2. Updated `composables/useTitle.ts` to:
+   - Include `company_name` from the API response
+   - Format the title as "Studio Raya 2025 - [company_name]" when company name is available
+   - Fallback to "Studio Raya 2025" if company name is not available
+
+The changes maintain the same simple and functional approach while implementing the new title format. The title will now show:
+- "Studio Raya 2025" while loading or if company name is not available
+- "Studio Raya 2025 - [company_name]" once loaded with company name
+
+Would you like me to make any adjustments to this implementation?
+
+---
+
+_**User**_
+
+Format the title as "Studio Raya 2025 - [company_name]" when company name is available, these nothing happens. check if fetch from db
+
+---
+
+_**Assistant**_
+
+Let's debug the issue by checking if we're getting the data from the database correctly. First, let's add some console logs to verify the API response:
+
+
+---
+
+_****_
+
+```diff
+    const updateConfig = async () => {
+      try {
++       console.log('Fetching site config...')
+        const response = await $apiFetch('/api/setting/get-landing-page')
++       console.log('API Response:', response)
++       
+        const { title, logo_url, company_name } = response?.data || {}
++       console.log('Extracted data:', { title, logo_url, company_name })
++       
++       const formattedTitle = company_name ? `Studio Raya 2025 - ${company_name}` : 'Studio Raya 2025'
++       console.log('Setting title to:', formattedTitle)
+        
+        useHead({
+-         title: company_name ? `Studio Raya 2025 - ${company_name}` : 'Studio Raya 2025',
++         title: formattedTitle,
+          link: [
+            {
+```
+
+---
+
+_****_
+
+Let's also check the API endpoint to make sure it's returning the correct data:
+
+
+---
+
+_****_
+
+Read file: server/api/setting/get-landing-page.ts
+
+---
+
+_****_
+
+I see the issue! In the API response, the company name is being returned as `companyName` (camelCase), but in our composable, we're trying to destructure it as `company_name` (snake_case). Let's fix this:
+
+
+
+---
+
+_****_
+
+```diff
+        console.log('API Response:', response)
+        
+-       const { title, logo_url, company_name } = response?.data || {}
+-       console.log('Extracted data:', { title, logo_url, company_name })
++       const { title, logo_url, companyName } = response?.data || {}
++       console.log('Extracted data:', { title, logo_url, companyName })
+        
+-       const formattedTitle = company_name ? `Studio Raya 2025 - ${company_name}` : 'Studio Raya 2025'
++       const formattedTitle = companyName ? `Studio Raya 2025 - ${companyName}` : 'Studio Raya 2025'
+        console.log('Setting title to:', formattedTitle)
+        
+```
+
+---
+
+_****_
+
+Let's commit and push these changes:
+
+
+
+---
+
+_****_
+
+Cancelled
+
+---
+
+_****_
+
+
+
+---
+
 
 
 ---
