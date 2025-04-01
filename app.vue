@@ -1,3 +1,14 @@
+<script setup lang="ts">
+import { onMounted } from 'vue'
+import { useTitle } from '~/composables/useTitle'
+
+const { updateTitle } = useTitle()
+
+onMounted(async () => {
+  await updateTitle()
+})
+</script>
+
 <template>
   <div>
     <NuxtLayout>
