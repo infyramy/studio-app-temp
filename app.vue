@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
-import { useTitle } from '~/composables/useTitle'
+import { useSiteConfig } from '~/composables/useTitle'
 
-const { updateTitle } = useTitle()
+const { updateConfig } = useSiteConfig()
 
 onMounted(async () => {
-  await updateTitle()
+  await updateConfig()
 })
 </script>
 
