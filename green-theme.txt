@@ -1,0 +1,90 @@
+/* Theme Colors */
+:root {
+  /* Brand Colors */
+  --color-primary: #166534; /* Dark Green */
+  --color-primary-light: #22C55E; /* Bright Green */
+  --color-primary-dark: #14532D; /* Deep Green */
+
+  /* Background Colors */
+  --color-bg-primary: #ECFDF5; /* Light Mint Green */
+  --color-bg-secondary: #D1FAE5; /* Soft Green */
+  --color-bg-tertiary: #A7F3D0; /* Light Green */
+  --color-bg-light: #FFFFFF; /* White */
+  --color-bg-dark: #064E3B; /* Forest Green */
+  --color-bg-white: #FFFFFF; /* White */
+
+  /* Text Colors */
+  --color-text-primary: #14532D; /* Deep Green */
+  --color-text-secondary: #166534; /* Dark Green */
+  --color-text-light: #FFFFFF; /* White */
+  --color-text-muted: rgba(22, 101, 52, 0.7); /* Green with 70% opacity */
+
+  /* Border Colors */
+  --color-border-primary: rgba(22, 101, 52, 0.1); /* Green with 10% opacity */
+  --color-border-secondary: rgba(22, 101, 52, 0.2); /* Green with 20% opacity */
+
+  /* Status Colors */
+  --color-success: #22C55E; /* Bright Green */
+  --color-error: #EF4444; /* Neutralized Red */
+  --color-warning: #F59E0B; /* Neutralized Yellow */
+  --color-info: #3B82F6; /* Neutralized Blue */
+
+  /* Gradient Backgrounds */
+  --gradient-primary: linear-gradient(to right, var(--color-primary), var(--color-primary-light));
+  --gradient-background: linear-gradient(to bottom right, var(--color-bg-primary), var(--color-bg-secondary), var(--color-bg-tertiary));
+}
+
+/* Typography */
+:root {
+  /* Font Families */
+  --font-primary: 'Geist', sans-serif;
+  --font-secondary: 'Plus Jakarta Sans', sans-serif;
+
+  /* Font Sizes */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+  --text-4xl: 2.25rem;
+}
+
+/* Spacing */
+:root {
+  --spacing-1: 0.25rem;
+  --spacing-2: 0.5rem;
+  --spacing-3: 0.75rem;
+  --spacing-4: 1rem;
+  --spacing-6: 1.5rem;
+  --spacing-8: 2rem;
+  --spacing-12: 3rem;
+  --spacing-16: 4rem;
+}
+
+/* Border Radius */
+:root {
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 2rem;
+}
+
+/* Shadows */
+:root {
+  --shadow-sm: 0 1px 2px 0 rgba(22, 101, 52, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(22, 101, 52, 0.1), 0 2px 4px -1px rgba(22, 101, 52, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(22, 101, 52, 0.1), 0 4px 6px -2px rgba(22, 101, 52, 0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(22, 101, 52, 0.1), 0 10px 10px -5px rgba(22, 101, 52, 0.04);
+}
+
+/* Transitions */
+:root {
+  --transition-all: all 0.3s ease-in-out;
+  --transition-colors: color 0.3s ease-in-out, background-color 0.3s ease-in-out;
+  --transition-transform: transform 0.3s ease-in-out;
+  --transition-shadow: box-shadow 0.3s ease-in-out;
+} 
