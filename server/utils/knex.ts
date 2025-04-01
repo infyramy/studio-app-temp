@@ -23,21 +23,31 @@ const knexConfig = {
     user: dbConfig.user,
     password: dbConfig.password,
     database: dbConfig.database,
-    connectTimeout: 10000, // Reduced to 10 seconds for faster failure
+    connectTimeout: 10000,
     ssl: {
-      rejectUnauthorized: false, // Add this if your DB uses SSL
+      rejectUnauthorized: false,
     },
   },
   pool: {
-    min: 0, // Important for serverless: start with 0 connections
-    max: 50, // Reduced pool size for serverless
-    acquireTimeoutMillis: 15000, // Reduced timeout
-    createTimeoutMillis: 15000,
-    idleTimeoutMillis: 15000,
+    min: 2, // Keep at least 2 connections ready
+    max: 20, // Reduced from 50 to prevent overwhelming the database
+    acquireTimeoutMillis: 30000, // Increased timeout for better reliability
+    createTimeoutMillis: 30000,
+    idleTimeoutMillis: 30000,
     reapIntervalMillis: 1000,
     createRetryIntervalMillis: 2000,
+    propagateCreateError: false, // Don't throw errors on connection creation
   },
-  acquireConnectionTimeout: 15000,
+  acquireConnectionTimeout: 30000,
+  afterCreate: (conn: any, done: Function) => {
+    // Set session variables for better performance
+    conn.query('SET SESSION wait_timeout=28800;', (err: Error) => {
+      if (err) {
+        console.error('Error setting session timeout:', err);
+      }
+      done(err, conn);
+    });
+  },
 };
 
 // Create knex instance with connection handling

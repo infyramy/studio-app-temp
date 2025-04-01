@@ -541,13 +541,13 @@ The build error should now be resolved. The changes maintain the same functional
 
 _**User**_
 
-okau success, now please change title to 'Studio Raya 2025 -[company_name}, when not loading just Studio Raya 2025
+okau success, now please change title to 'Studio Raya 2025 -[companyName}, when not loading just Studio Raya 2025
 
 ---
 
 _**Assistant**_
 
-I'll modify the code to show "Studio Raya 2025 - [company_name]" when loaded and "Studio Raya 2025" as the default/loading title.
+I'll modify the code to show "Studio Raya 2025 - [companyName]" when loaded and "Studio Raya 2025" as the default/loading title.
 
 First, let's update the Nuxt config with the default title:
 
@@ -580,11 +580,11 @@ _****_
       try {
         const response = await $apiFetch('/api/setting/get-landing-page')
 -       const { title, logo_url } = response?.data || {}
-+       const { title, logo_url, company_name } = response?.data || {}
++       const { title, logo_url, companyName } = response?.data || {}
         
         useHead({
 -         title,
-+         title: company_name ? `Studio Raya 2025 - ${company_name}` : 'Studio Raya 2025',
++         title: companyName ? `Studio Raya 2025 - ${companyName}` : 'Studio Raya 2025',
           link: [
             {
 ```
@@ -607,20 +607,19 @@ git add . && git commit -m "feat: update title format to include company name" &
 
 ```
 zahiruliman@Zahiruls-MacBook-Air studio-app-temp % git add . && git commit -m "feat: update title format to 
-include company name" && git push                  git add . && git commit -m "feat: update title format to 
-include company name" && git push
-[testing b14509e] feat: update title format to include company name
- 3 files changed, 548 insertions(+), 3 deletions(-)
- create mode 100644 .specstory/history/2025-04-01_14-13-dynamic-title-configuration-in-nuxt-js.md
-Enumerating objects: 14, done.
-Counting objects: 100% (14/14), done.
+include company name" &git add . && git commit -m "feat: update title format to include company name" && git
+ push
+[testing 57aa74c] feat: update title format to include company name
+ 2 files changed, 205 insertions(+), 2 deletions(-)
+Enumerating objects: 13, done.
+Counting objects: 100% (13/13), done.
 Delta compression using up to 8 threads
-Compressing objects: 100% (7/7), done.
-Writing objects: 100% (8/8), 4.66 KiB | 4.66 MiB/s, done.
-Total 8 (delta 4), reused 0 (delta 0), pack-reused 0 (from 0)
+Compressing objects: 100% (6/6), done.
+Writing objects: 100% (7/7), 1.83 KiB | 1.83 MiB/s, done.
+Total 7 (delta 4), reused 0 (delta 0), pack-reused 0 (from 0)
 remote: Resolving deltas: 100% (4/4), completed with 4 local objects.
 To github.com:infyramy/studio-app-temp.git
-   bad5e4e..b14509e  testing -> testing
+   b14509e..57aa74c  testing -> testing
 zahiruliman@Zahiruls-MacBook-Air studio-app-temp %
 ```
 
@@ -631,16 +630,17 @@ _****_
 I've made the following changes:
 
 1. Updated `nuxt.config.ts` to:
-   - Set the default title to "Studio Raya 2025" (shown while loading)
+   - Set the default title to "Studio Raya 2025" (this will show while loading)
 
-2. Updated `composables/useTitle.ts` to:
-   - Include `company_name` from the API response
-   - Format the title as "Studio Raya 2025 - [company_name]" when company name is available
-   - Fallback to "Studio Raya 2025" if company name is not available
+2. Modified `composables/useTitle.ts` to:
+   - Include `companyName` from the API response
+   - Format the title as "Studio Raya 2025 - [companyName]" when company name is available
+   - Fall back to "Studio Raya 2025" if company name is not available
 
-The changes maintain the same simple and functional approach while implementing the new title format. The title will now show:
-- "Studio Raya 2025" while loading or if company name is not available
-- "Studio Raya 2025 - [company_name]" once loaded with company name
+The changes have been committed and pushed to the testing branch. Now:
+- Initially, users will see "Studio Raya 2025"
+- After the data loads, they'll see "Studio Raya 2025 - [companyName]"
+- If there's any error or company name is not available, they'll continue to see "Studio Raya 2025"
 
 Would you like me to make any adjustments to this implementation?
 
@@ -648,84 +648,89 @@ Would you like me to make any adjustments to this implementation?
 
 _**User**_
 
-Format the title as "Studio Raya 2025 - [company_name]" when company name is available, these nothing happens. check if fetch from db
+okay nice. now i need to check my db always full connection pool and make all timeout. ccan you check what is the problem with my app
 
 ---
 
 _**Assistant**_
 
-Let's debug the issue by checking if we're getting the data from the database correctly. First, let's add some console logs to verify the API response:
+I'll help you investigate the database connection pool and timeout issues. Let's first check the database configuration and connection handling.
+
+Let me search for database-related code:
 
 
 ---
 
 _****_
 
-```diff
-    const updateConfig = async () => {
-      try {
-+       console.log('Fetching site config...')
-        const response = await $apiFetch('/api/setting/get-landing-page')
-+       console.log('API Response:', response)
-+       
-        const { title, logo_url, company_name } = response?.data || {}
-+       console.log('Extracted data:', { title, logo_url, company_name })
-+       
-+       const formattedTitle = company_name ? `Studio Raya 2025 - ${company_name}` : 'Studio Raya 2025'
-+       console.log('Setting title to:', formattedTitle)
+<details>
+            <summary>Searched codebase "database connection pool knex configuration" • **25** results</summary>
         
-        useHead({
--         title: company_name ? `Studio Raya 2025 - ${company_name}` : 'Studio Raya 2025',
-+         title: formattedTitle,
-          link: [
-            {
+| File | Lines |
+|------|-------|
+| `server/utils/knex.ts` | L15-72 |
+| `server/utils/knex.ts` | L72-93 |
+| `server/utils/knex.ts` | L1-15 |
+| `server/utils/db.ts` | L1-21 |
+| `server/utils/knex.ts` | L93-95 |
+| `server/utils/db.config.ts` | L1-7 |
+| `server/utils/db.ts` | L21-24 |
+| `server/api/users.ts` | L1-15 |
+| `server/api/booking/get-config.ts` | L1-76 |
+| `server/cron/booking-reminder.ts` | L13-69 |
+| `server/api/users/search.ts` | L1-67 |
+| `server/api/auth/refresh.ts` | L1-12 |
+| `server/api/auth/verify.ts` | L1-11 |
+| `server/cron/booking-reminder.ts` | L69-92 |
+| `server/cron/booking-reminder.ts` | L1-11 |
+| `server/api/setting/get-configs.ts` | L1-46 |
+| `server/api/setting/update-organization.ts` | L1-71 |
+| `server/api/setting/get-landing-page.ts` | L1-70 |
+| `server/api/booking/get-date-range.ts` | L1-20 |
+| `server/api/auth/login.ts` | L1-48 |
+| `server/api/booking/get-slots.ts` | L1-9 |
+| `server/api/setting/update-whatsapp-config.post.ts` | L1-52 |
+| `server/api/setting/update-slot-config.ts` | L1-9 |
+| `server/api/booking/get-bookings.ts` | L1-7 |
+| `server/utils/calendar.ts` | L1-8 |
+
+</details>
+
+---
+
+_****_
+
+I can see several potential issues that could be causing connection pool and timeout problems:
+
+1. In `server/utils/knex.ts`, the current pool configuration is:
+```typescript
+pool: {
+  min: 0,
+  max: 50,
+  acquireTimeoutMillis: 15000,
+  createTimeoutMillis: 15000,
+  idleTimeoutMillis: 15000,
+  reapIntervalMillis: 1000,
+  createRetryIntervalMillis: 2000,
+}
 ```
 
----
-
-_****_
-
-Let's also check the API endpoint to make sure it's returning the correct data:
-
-
----
-
-_****_
-
-Read file: server/api/setting/get-landing-page.ts
-
----
-
-_****_
-
-I see the issue! In the API response, the company name is being returned as `companyName` (camelCase), but in our composable, we're trying to destructure it as `company_name` (snake_case). Let's fix this:
-
-
-
----
-
-_****_
-
-```diff
-        console.log('API Response:', response)
-        
--       const { title, logo_url, company_name } = response?.data || {}
--       console.log('Extracted data:', { title, logo_url, company_name })
-+       const { title, logo_url, companyName } = response?.data || {}
-+       console.log('Extracted data:', { title, logo_url, companyName })
-        
--       const formattedTitle = company_name ? `Studio Raya 2025 - ${company_name}` : 'Studio Raya 2025'
-+       const formattedTitle = companyName ? `Studio Raya 2025 - ${companyName}` : 'Studio Raya 2025'
-        console.log('Setting title to:', formattedTitle)
-        
+2. In `server/utils/db.ts`, there's another connection pool with different settings:
+```typescript
+const pool = mysql.createPool({
+  ...dbConfig,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+})
 ```
 
----
+3. Looking at the API endpoints, I notice several issues:
+   - Many endpoints make multiple separate database queries instead of combining them
+   - Some endpoints don't properly release connections
+   - No connection pooling strategy is consistently used across the application
 
-_****_
-
-Let's commit and push these changes:
-
+Let's fix these issues. First, let's optimize the Knex configuration:
 
 
 ---
