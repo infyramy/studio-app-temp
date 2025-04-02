@@ -5630,11 +5630,795 @@ Let me modify the code to match the working version while keeping the improved e
 
 _****_
 
-Cancelled
+```diff
+                      },
+                      body: JSON.stringify(chipRequestBody),
+-                     signal: controller.signal,
+-                     keepalive: true,
+-                     cache: 'no-store',
+-                     mode: 'cors',
+-                     credentials: 'omit',
+-                     // Add connection options
+-                     duplex: 'half',
+-                     redirect: 'follow',
+-                     integrity: undefined,
+-                     referrer: undefined,
+-                     referrerPolicy: undefined,
+-                     // Increase timeout for each attempt
+-                     timeout: 30000 * attempt // 30s, 60s, 90s
++                     signal: controller.signal
+                    }
+                  );
+```
 
 ---
 
 _****_
+
+I've simplified the fetch request to match the working version by:
+
+1. Removing all the additional connection options that were causing issues:
+   - Removed `duplex`, `redirect`, `integrity`, `referrer`, `referrerPolicy`
+   - Removed the per-attempt timeout
+   - Removed `keepalive`, `cache`, `mode`, `credentials`
+
+2. Kept only the essential options that were in the working version:
+   - `method: "POST"`
+   - `headers` with Authorization, Content-Type, and Accept
+   - `body` with the request data
+   - `signal` for timeout control
+
+3. Maintained the improved error handling and logging
+
+The key differences that were causing the payment error were:
+1. The additional connection options were interfering with the request
+2. The per-attempt timeout was causing premature timeouts
+3. The `duplex` option was causing TypeScript errors and potentially affecting the connection
+
+Try the payment process again. The request should now match the working version's configuration while still having better error handling and logging. This should resolve the connection timeout issues.
+
+Let me know if you still experience any problems and I'll help you troubleshoot further.
+
+---
+
+_**User**_
+
+
+CHIP API home pagedark logo
+
+Search...
+⌘K
+Support
+Blog
+Dashboard
+CHIP Collect
+CHIP Send
+Overview
+CHIP Collect API
+Online purchases
+Billing
+Callbacks
+Authentication
+API Reference
+Purchases
+POST
+Create a purchase
+GET
+Retrieve a purchase
+POST
+Cancel a pending purchase
+POST
+Release funds on hold
+POST
+Capture a previously authorized payment
+POST
+Charge a purchase using a saved token
+POST
+Delete a recurring token associated with a purchase
+POST
+Refund a paid purchase
+POST
+Mark a purchase as paid
+POST
+Resend an invoice
+Payment methods
+Billings
+Clients
+Webhooks
+Public key
+Account
+Company statements
+Purchases
+Create a purchase
+POST
+/
+purchases
+
+Try it
+To run payments in your application use POST /purchases/, request to register payments and receive the checkout link (checkout_url). After the payment is processed, gateway will redirect the client back to your website (take note of success_redirect, failure_redirect).
+
+To set the price to the smallest unit possible, the value of the price field is expected to be specified in cents. For example, price: 100 is equivalent to RM 1.00
+
+You have three options to check payment status:
+
+use success_callback parameter of Purchase object.
+use GET /purchases/<purchase_id>/ request.
+set up a Webhook using the UI or Webhook API to listen to purchase.paid or purchase.payment_failure event on your server.
+Using skip_capture flag allows you to separate the authentication and payment execution steps, allowing you to reserve funds on payer’s card account for some time. This flag can also enable preauthorization capability, allowing you to save the card without a financial transaction, if available.
+
+In case making a purchase client agrees to store his card for the upcoming purchases, next time he will be able to pay in a single click.
+
+Instead of a redirect you can also utilize Direct Post checkout: you can create an HTML <form> on your website with method="POST" and action pointing to direct_post_url of a created Purchase. You will also need to saturate form with <input>-s for card data fields. As a result, when a payer submits their card data, it will be posted straight to our system, allowing you to customize the checkout as you wish while your PCI DSS requirement is only raised to SAQ A-EP, as your system doesn’t receive or process card data. For more details, see the documentation on Purchase’s direct_post_url field.
+
+To pay for test Purchases, use 4444 3333 2222 1111 as the card number, 123 as CVC, any date/month greater than now as expiry and any (Latin) cardholder name. Any other card number/CVC/expiry not greater or equal than the current month will all fail a test payment.
+
+Authorizations
+​
+Authorization
+stringheaderrequired
+Bearer authentication header of the form Bearer <token>, where <token> is your auth token.
+
+Body
+application/json
+Record of a single purchase operation, either a transaction originating from e-commerce integration or invoice sent. Has a status attribute, e.g. can be created, paid or refunded.
+
+​
+client
+objectrequired
+Either this or .client_id is required.
+
+
+Show child attributes
+
+​
+purchase
+objectrequired
+Core information about the Purchase, including the products, total, currency and invoice fields. If you're using invoicing via /billing/ or /billing_templates/, this object will be copied 1:1 from BillingTemplate you specify to the resulting Purchases (also to subscription Purchases).
+
+
+Show child attributes
+
+​
+brand_id
+stringrequired
+ID of the brand to create this Purchase for. You can copy it down in the API section, see the "specify the ID of the Brand" link in answer to "How to setup payments on website or in mobile app?".
+
+​
+client_id
+string | null
+ID of a Client object used to initialize ClientDetails (.client) of this Purchase. Either this field or specifying .client object is required (you can only specify a value for one of these fields). All ClientDetails fields from the Client will be copied to .client object. Note that editing Client object won't change the respective fields in already created Purchases.
+
+If you specify this field and your client saves a recurring_token (for instance, by saving their card), the respective ClientRecurringToken will be created. See the /clients/{id}/recurring_tokens/ endpoint.
+
+​
+send_receipt
+booleandefault:false
+Whether to send receipt email for this Purchase when it's paid.
+
+​
+skip_capture
+booleandefault:false
+Card payment-specific: if set to true, only authorize the payment (place funds on hold) when payer enters his card data and pays. This option requires a POST /capture/ or POST /release/ later on.
+
+You can use the preauthorization feature if you set this parameter to true and make the Purchase with purchase.total == 0 (this can be achieved by providing a list of purchase.products with a total price of 0, or simply overriding the total using purchase.total_override to 0). The resulting Purchase can only be "paid" by the client (only cardholder data verification will happen, without a financial transaction) by card and will enforce saving the client's card. When this happens, the Purchase will have status of preauthorized and the purchase.preauthorized webhook callbacks will be emitted.
+
+Trying to use skip_capture (or preauthorization) without any payment methods that support the respective actions (this can be a result of payment_method_whitelist field being used) will result in an error on Purchase creation request step. Please check the GET /payment_methods/ response for your desired Purchase parameters and/or consult with your account manager.
+
+​
+force_recurring
+booleandefault:false
+If the used payment method supports recurring payment functionality, forces the customer's payment credentials to be saved for possible later recurring payments, without giving the customer a choice in the matter.
+
+​
+reference
+string
+Invoice reference.
+
+Maximum length: 128
+​
+issued
+string
+Value for 'Invoice issued' field. Display-only, does not get validated. If not provided, will be generated as the current date in purchase.timezone at the moment of Purchase's creation.
+
+Example:
+"2020-04-30"
+
+​
+due
+integer
+When the payment is due for this Purchase. The default behaviour is to still allow payment once this moment passes. To change that, set purchase.due_strict to true.
+
+Example:
+1619740800
+
+​
+payment_method_whitelist
+string[]
+An optional whitelist of payment methods availble for this purchase. Use this field if you want to restrict your payer to pay using only one or several specific methods.
+
+Using this field and at the same time trying to use specific capabilities of a Purchase (e.g. skip_capture or charging it using a saved card token using POST /purchases/{id}/charge/) can cause a situation when there are no payment methods available for paying this Purchase. This will cause a validation error on Purchase creation. Please check the GET /payment_methods/ response for your desired Purchase parameters and/or consult with your account manager.
+
+Payment method name as returned by GET /payment_methods/.
+
+​
+success_redirect
+string
+When Purchase is paid for successfully, your customer will be taken to this link. Otherwise a standard screen will be displayed.
+
+Maximum length: 500
+​
+failure_redirect
+string
+If there's a payment failure for this Purchase, your customer will be taken to this link. Otherwise a standard screen will be displayed.
+
+Maximum length: 500
+​
+cancel_redirect
+string
+If you provide this link, customer will have an option to go to it instead of making payment (a button with 'Return to seller' text will be displayed). Can't contain any of the following symbols: <>'" .
+
+Be aware that this does not cancel the payment (e.g. does not do the equivalent of doing the POST /purchases/{id}/cancel/ request); the client will still be able to press 'Back' in the browser and perform the payment.
+
+Maximum length: 500
+​
+success_callback
+string
+When Purchase is paid for successfully, the success_callback URL will receive a POST request with the Purchase object's data in body.
+
+Maximum length: 500
+​
+creator_agent
+string
+Identification of software (e.g. an ecommerce module and version) used to create this purchase, if any.
+
+Maximum length: 32
+​
+platform
+enum<string>
+Platform this Purchase was created on.
+
+Available options: web, api, ios, android, macos, windows 
+Response
+201
+
+201
+application/json
+OK
+Record of a single purchase operation, either a transaction originating from e-commerce integration or invoice sent. Has a status attribute, e.g. can be created, paid or refunded.
+
+​
+client
+objectrequired
+Either this or .client_id is required.
+
+
+Show child attributes
+
+​
+purchase
+objectrequired
+Core information about the Purchase, including the products, total, currency and invoice fields. If you're using invoicing via /billing/ or /billing_templates/, this object will be copied 1:1 from BillingTemplate you specify to the resulting Purchases (also to subscription Purchases).
+
+
+Show child attributes
+
+​
+brand_id
+stringrequired
+ID of the brand to create this Purchase for. You can copy it down in the API section, see the "specify the ID of the Brand" link in answer to "How to setup payments on website or in mobile app?".
+
+​
+type
+string
+Object type identifier
+
+​
+id
+string
+​
+created_on
+integer
+Object creation time
+
+Example:
+1619740800
+
+​
+updated_on
+integer
+Object last modification time
+
+Example:
+1619740800
+
+​
+payment
+object | null
+Details of an executed transaction. Read-only for Purchases and Payouts. For an unpaid Purchase, this object will be null.
+
+
+Show child attributes
+
+​
+issuer_details
+object
+Read-only details of issuer company/brand, persisted for invoice display.
+
+
+Show child attributes
+
+​
+transaction_data
+object
+Payment method-specific, read-only transaction data. Will contain information about all the transaction attempts and possible errors, if available.
+
+
+Show child attributes
+
+​
+status
+enum<string>default:created
+Purchase status. Can have the following values:
+
+created: Purchase was created using POST /purchases/ or Billing API capabilities.
+sent: Invoice for this purchase was sent over email using Billing API capabilities.
+viewed: The client has viewed the payform and/or invoice details for this purchase.
+error: There was a failed payment attempt for this purchase because of a problem with customer's payment instrument (e.g. low account balance). You can analyze the .transaction_data to get information on reason of the failure.
+cancelled: Purchase was cancelled using the POST /purchases/{id}/cancel/ endpoint; payment for it is not possible anymore.
+overdue: Purchase is past its' .due, but payment for it is still possible (unless e.g. POST /purchases/{id}/cancel/ is used).
+expired: Purchase is past its' .due and payment for it isn't possible anymore (as a result of purchase.due_strict having been set to true).
+blocked: Like error, but payment attempt was blocked due to fraud scoring below threshold or other security checks not passing.
+hold: Funds are on hold for this Purchase (.skip_capture: true was used). You can now run POST /capture/ or POST /release/ for this payment to capture the payment or return funds to the client, respectively.
+released: This Purchase previously had hold status, but funds have since been released and returned to the customer's card.
+pending_release: release of funds for this Purchase is in processing, but is not finalized on the acquirer side yet. Is set by POST /purchases/{id}/release/ operation when it takes longer than expected to process on the acquirer side.
+pending_capture: capture of funds for this Purchase is in processing, but is not finalized on the acquirer side yet. Is set by POST /purchases/{id}/capture/ operation when it takes longer than expected to process on the acquirer side.
+preauthorized: A preauthorization of a card (authorization of card data without a financial transaction) was executed successfully using this Purchase. See the description of the .skip_capture field for more details.
+paid: Purchase was successfully paid for.
+pending_execute: Payment (or hold in case of skip_capture) for this Purchase is in processing, but is not finalized on the acquirer side yet.
+pending_charge: Recurring payment for this Purchase is in processing, but is not finalized on the acquirer side yet. Is set by POST /purchases/{id}/charge/ operation when it takes longer than expected to process on the acquirer side.
+cleared: Funds for this Purchase (that was already paid) have been transferred for clearing in payment card network. All non-card payment methods and some card payment methods (depends on configuration) don't use this status and Purchases paid using them stay in paid status instead.
+settled: Settlement was issued for funds for this Purchase (that was already paid). All non-card payment methods and some card payment methods (depends on configuration) don't use this status and Purchases paid using them stay in paid status instead.
+chargeback: A chargeback was registered for this, previously paid, Purchase.
+pending_refund: a refund (full or partial) for this Purchase is in processing, but is not finalized on the acquirer side yet. Is set by POST /purchases/{id}/refund/ operation when it takes longer than expected to process on the acquirer side.
+refunded: This Purchase had its payment refunded, fully or partially.
+Available options: created, sent, viewed, error, cancelled, overdue, expired, blocked, hold, released, pending_release, pending_capture, preauthorized, paid, pending_execute, pending_charge, cleared, settled, chargeback, pending_refund, refunded 
+​
+status_history
+object[]
+History of status changes, latest last. Might contain entry about a related object, e.g. status change to refunded will contain a reference to the refund Payment.
+
+
+Show child attributes
+
+​
+viewed_on
+integer
+Time the payment form or invoice page was first viewed on
+
+Example:
+1619740800
+
+​
+company_id
+string
+​
+is_test
+boolean
+Indicates this is a test object, created using test API keys or using Billing section of UI while in test mode.
+
+​
+user_id
+string | null
+ID of user who has created this object in the Billing UI, if applicable.
+
+​
+billing_template_id
+string | null
+ID of a BillingTemplate that has spawned this Purchase, if any.
+
+​
+client_id
+string | null
+ID of a Client object used to initialize ClientDetails (.client) of this Purchase. Either this field or specifying .client object is required (you can only specify a value for one of these fields). All ClientDetails fields from the Client will be copied to .client object. Note that editing Client object won't change the respective fields in already created Purchases.
+
+If you specify this field and your client saves a recurring_token (for instance, by saving their card), the respective ClientRecurringToken will be created. See the /clients/{id}/recurring_tokens/ endpoint.
+
+​
+send_receipt
+booleandefault:false
+Whether to send receipt email for this Purchase when it's paid.
+
+​
+is_recurring_token
+boolean
+Indicates whether a recurring token (e.g. for card payments - card token) was saved for this Purchase. If this is true, the id of this Purchase can be used as a recurring_token in POST /purchases/{id}/charge/, enabling you to pay for that Purchase using the same method (same card for card payments) that this one was paid with.
+
+​
+recurring_token
+string | null
+ID of a recurring token (Purchase having is_recurring_token == true) that was used to pay this Purchase, if any.
+
+​
+skip_capture
+booleandefault:false
+Card payment-specific: if set to true, only authorize the payment (place funds on hold) when payer enters his card data and pays. This option requires a POST /capture/ or POST /release/ later on.
+
+You can use the preauthorization feature if you set this parameter to true and make the Purchase with purchase.total == 0 (this can be achieved by providing a list of purchase.products with a total price of 0, or simply overriding the total using purchase.total_override to 0). The resulting Purchase can only be "paid" by the client (only cardholder data verification will happen, without a financial transaction) by card and will enforce saving the client's card. When this happens, the Purchase will have status of preauthorized and the purchase.preauthorized webhook callbacks will be emitted.
+
+Trying to use skip_capture (or preauthorization) without any payment methods that support the respective actions (this can be a result of payment_method_whitelist field being used) will result in an error on Purchase creation request step. Please check the GET /payment_methods/ response for your desired Purchase parameters and/or consult with your account manager.
+
+​
+force_recurring
+booleandefault:false
+If the used payment method supports recurring payment functionality, forces the customer's payment credentials to be saved for possible later recurring payments, without giving the customer a choice in the matter.
+
+​
+reference_generated
+string
+If you don't provide an invoice reference yourself, this autogenerated value will be used as a reference instead.
+
+​
+reference
+string
+Invoice reference.
+
+Maximum length: 128
+​
+issued
+string
+Value for 'Invoice issued' field. Display-only, does not get validated. If not provided, will be generated as the current date in purchase.timezone at the moment of Purchase's creation.
+
+Example:
+"2020-04-30"
+
+​
+due
+integer
+When the payment is due for this Purchase. The default behaviour is to still allow payment once this moment passes. To change that, set purchase.due_strict to true.
+
+Example:
+1619740800
+
+​
+refund_availability
+enum<string>
+Specifies, if the purchase can be refunded fully and partially, only fully, partially or not at all.
+
+Available options: all, full_only, partial_only, pis_all, pis_partial, none 
+​
+refundable_amount
+integer
+Amount of money as the smallest indivisible units of the currency. Examples: 100 is equivalent to RM 1.00.
+
+​
+currency_conversion
+object | null
+This object is present when automatic currency conversion has occurred upon creation of the purchase. Purchase's original currency was changed and its original amount was converted using the exchange rate shown here.
+
+
+Show child attributes
+
+​
+payment_method_whitelist
+string[]
+An optional whitelist of payment methods availble for this purchase. Use this field if you want to restrict your payer to pay using only one or several specific methods.
+
+Using this field and at the same time trying to use specific capabilities of a Purchase (e.g. skip_capture or charging it using a saved card token using POST /purchases/{id}/charge/) can cause a situation when there are no payment methods available for paying this Purchase. This will cause a validation error on Purchase creation. Please check the GET /payment_methods/ response for your desired Purchase parameters and/or consult with your account manager.
+
+Payment method name as returned by GET /payment_methods/.
+
+​
+success_redirect
+string
+When Purchase is paid for successfully, your customer will be taken to this link. Otherwise a standard screen will be displayed.
+
+Maximum length: 500
+​
+failure_redirect
+string
+If there's a payment failure for this Purchase, your customer will be taken to this link. Otherwise a standard screen will be displayed.
+
+Maximum length: 500
+​
+cancel_redirect
+string
+If you provide this link, customer will have an option to go to it instead of making payment (a button with 'Return to seller' text will be displayed). Can't contain any of the following symbols: <>'" .
+
+Be aware that this does not cancel the payment (e.g. does not do the equivalent of doing the POST /purchases/{id}/cancel/ request); the client will still be able to press 'Back' in the browser and perform the payment.
+
+Maximum length: 500
+​
+success_callback
+string
+When Purchase is paid for successfully, the success_callback URL will receive a POST request with the Purchase object's data in body.
+
+Maximum length: 500
+​
+creator_agent
+string
+Identification of software (e.g. an ecommerce module and version) used to create this purchase, if any.
+
+Maximum length: 32
+​
+platform
+enum<string>
+Platform this Purchase was created on.
+
+Available options: web, api, ios, android, macos, windows 
+​
+product
+enum<string>
+Defines which gateway product was used to create this Purchase.
+
+Available options: purchases, billing_invoices, billing_subscriptions, billing_subscriptions_invoice 
+​
+created_from_ip
+string
+IP the Purchase was created from.
+
+​
+invoice_url
+string
+URL you will be able to access invoice for this Purchase at, if applicable
+
+Maximum length: 500
+​
+checkout_url
+string
+URL you will be able to access the checkout for this Purchase at, if payment for it is possible. When building integrations, redirect the customer to this URL once purchase is created.
+
+You can add the preferred query arg to the checkout_url in order to force redirect the client straight to the checkout for a specific payment method (?preferred={payment_method}, where {payment_method} is the payment method name as returned by GET /payment_methods/). If this method redirects the client further to a different system and no customer data entry is needed on gateway's checkout page, your payer will be taken straight to that page (not seeing the gateway's checkout UI); otherwise, he will see the payment method entry UI on the gateway checkout page.
+
+Maximum length: 500
+​
+direct_post_url
+string
+URL that can be used for Direct Post integration.
+
+This functionality is activated for each merchant account individually. Please consult with your account manager if you wish to use it.
+
+Will be null if payment for purchase is not possible, purchase.request_client_details isn't empty or success_redirect/failure_redirect are not provided - these all break the usual direct post flow.
+
+To leverage Direct Post checkout, create a <form> having method="POST" action="<direct_post_url value>" and include the following inputs:
+
+cardholder_name: text, Latin letters only (space and apostrophe ('), dot (.), dash (-) symbols are also allowed), max 30 chars
+
+card_number: text, digits only, no whitespace, max 19 chars
+
+expires: text in 'MM/YY' format, digits and a slash only /^\d{2}\/\d{2}$/, max 5 chars
+
+cvc: numeric string of 3 or 4 digits
+
+remember_card: checkbox with value="on" (the default when omitting value attribute of a checkbox input)
+
+Ensure the validation as listed above! Validation errors will be treated as payment failures. Obviously, you can style this form to fit in with the rest of your website.
+
+When your payer submits this form (don't forget a <button> or <input type="submit">), he will POST the data directly to the gateway system. There, with minimal interaction with gateway's interface, payment will be processed. In the process, your customer might get redirected to authenticate against 3D Secure system of his card issuer bank (this depends on settings of his card and your account). After that, payer will be taken to success_redirect or failure_redirect depending on the payment result (as in the usual payment flow).
+
+Be aware, though, that while not having to process card data allows you not to comply with the entirety of PCI DSS SAQ D requirements, having sensitive cardholder data entry form on your website does raise your PCI DSS scope to SAQ A-EP. Contact your account manager to receive advisory and assistance for this integration method.
+
+Maximum length: 500
+​
+marked_as_paid
+boolean
+True if a purchase was manually marked as paid.
+
+​
+order_id
+string
+ID of corresponding order.
+
+Authentication
+Retrieve a purchase
+facebook
+instagram
+github
+linkedin
+twitter
+Powered by Mintlify
+
+cURL
+
+Python
+
+JavaScript
+
+PHP
+
+Go
+
+Java
+
+Copy
+curl --request POST \
+  --url https://gate.chip-in.asia/api/v1/purchases/ \
+  --header 'Authorization: Bearer <token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+  "client": {
+    "email": "test@test.com"
+  },
+  "purchase": {
+    "products": [
+      {
+        "name": "test",
+        "price": 1000
+      }
+    ]
+  },
+  "brand_id": "409eb80e-3782-4b1d-afa8-b779759266a5"
+}'
+
+201
+
+400
+
+Copy
+{
+  "type": "<string>",
+  "id": "3c90c3cc-0d44-4b50-8888-8dd25736052a",
+  "created_on": 1619740800,
+  "updated_on": 1619740800,
+  "client": {
+    "bank_account": "<string>",
+    "bank_code": "<string>",
+    "email": "jsmith@example.com",
+    "phone": "+44 45643564564",
+    "full_name": "<string>",
+    "personal_code": "<string>",
+    "street_address": "<string>",
+    "country": "<string>",
+    "city": "<string>",
+    "zip_code": "<string>",
+    "state": "<string>",
+    "shipping_street_address": "<string>",
+    "shipping_country": "<string>",
+    "shipping_city": "<string>",
+    "shipping_zip_code": "<string>",
+    "shipping_state": "<string>",
+    "cc": [
+      "jsmith@example.com"
+    ],
+    "bcc": [
+      "jsmith@example.com"
+    ],
+    "legal_name": "<string>",
+    "brand_name": "<string>",
+    "registration_number": "<string>",
+    "tax_number": "<string>"
+  },
+  "purchase": {
+    "currency": "<string>",
+    "products": [
+      {
+        "name": "<string>",
+        "quantity": 1,
+        "price": 1,
+        "discount": 1,
+        "tax_percent": 0,
+        "category": "<string>"
+      }
+    ],
+    "total": 123,
+    "language": "Default value is controlled in Company -> Brand section of merchant portal separately per each Brand used (default value, if no changes are made, is `en`). Brand to be used with corresponding Purchase/BillingTemplate specified using brand_id.",
+    "notes": "<string>",
+    "debt": 123,
+    "subtotal_override": 123,
+    "total_tax_override": 123,
+    "total_discount_override": 123,
+    "total_override": 123,
+    "request_client_details": [],
+    "timezone": "Europe/Oslo",
+    "due_strict": false,
+    "email_message": "<string>"
+  },
+  "payment": {
+    "is_outgoing": false,
+    "payment_type": "purchase",
+    "amount": 123,
+    "currency": "<string>",
+    "net_amount": 123,
+    "fee_amount": 123,
+    "pending_amount": 123,
+    "pending_unfreeze_on": 1619740800,
+    "description": "<string>",
+    "paid_on": 1619740800,
+    "remote_paid_on": 1619740800
+  },
+  "issuer_details": {
+    "website": "<string>",
+    "legal_street_address": "<string>",
+    "legal_country": "<string>",
+    "legal_city": "<string>",
+    "legal_zip_code": "<string>",
+    "bank_accounts": [
+      {
+        "bank_account": "<string>",
+        "bank_code": "<string>"
+      }
+    ],
+    "legal_name": "<string>",
+    "brand_name": "<string>",
+    "registration_number": "<string>",
+    "tax_number": "<string>"
+  },
+  "transaction_data": {
+    "payment_method": "<string>",
+    "extra": {},
+    "country": "<string>",
+    "attempts": [
+      {
+        "type": "execute",
+        "successful": true,
+        "payment_method": "<string>",
+        "extra": {},
+        "country": "<string>",
+        "client_ip": "<string>",
+        "processing_time": 1619740800,
+        "error": {
+          "code": "<string>",
+          "message": "<string>"
+        }
+      }
+    ]
+  },
+  "status": "created",
+  "status_history": [
+    {
+      "status": "created",
+      "timestamp": 1619740800,
+      "related_object": {
+        "type": "<string>",
+        "id": "3c90c3cc-0d44-4b50-8888-8dd25736052a"
+      }
+    }
+  ],
+  "viewed_on": 1619740800,
+  "company_id": "3c90c3cc-0d44-4b50-8888-8dd25736052a",
+  "is_test": true,
+  "user_id": "3c90c3cc-0d44-4b50-8888-8dd25736052a",
+  "brand_id": "3c90c3cc-0d44-4b50-8888-8dd25736052a",
+  "billing_template_id": "3c90c3cc-0d44-4b50-8888-8dd25736052a",
+  "client_id": null,
+  "send_receipt": false,
+  "is_recurring_token": true,
+  "recurring_token": "3c90c3cc-0d44-4b50-8888-8dd25736052a",
+  "skip_capture": false,
+  "force_recurring": false,
+  "reference_generated": "<string>",
+  "reference": "<string>",
+  "issued": "2020-04-30",
+  "due": 1619740800,
+  "refund_availability": "all",
+  "refundable_amount": 123,
+  "currency_conversion": {
+    "original_currency": "<string>",
+    "original_amount": 123,
+    "exchange_rate": 123
+  },
+  "payment_method_whitelist": [
+    "<string>"
+  ],
+  "success_redirect": "<string>",
+  "failure_redirect": "<string>",
+  "cancel_redirect": "<string>",
+  "success_callback": "<string>",
+  "creator_agent": "<string>",
+  "platform": "web",
+  "product": "purchases",
+  "created_from_ip": "<string>",
+  "invoice_url": "<string>",
+  "checkout_url": "<string>",
+  "direct_post_url": "<string>",
+  "marked_as_paid": true,
+  "order_id": "<string>"
+}
+Create a purchase - CHIP API
+
+
+---
+
+_**Assistant**_
 
 
 

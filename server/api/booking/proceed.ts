@@ -390,18 +390,19 @@ export default defineEventHandler(async (event: H3Event) => {
           purchase: {
             products: [
               {
-                name: `Booking Session${
-                  body.payment_type === 2 ? " (Deposit)" : ""
-                }`,
+                name: `Booking Session${body.payment_type === 2 ? " (Deposit)" : ""}`,
                 price: Math.round(body.payment_amount * 100),
-              },
+                quantity: 1
+              }
             ],
             currency: "MYR",
+            total: Math.round(body.payment_amount * 100),
+            timezone: "Asia/Kuala_Lumpur"
           },
           client: {
             full_name: body.name,
             email: body.email,
-            phone: body.phone,
+            phone: body.phone
           },
           success_callback: `${process.env.PUBLIC_API_URL}/booking/payment-callback`,
           success_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=success`,
@@ -410,7 +411,7 @@ export default defineEventHandler(async (event: H3Event) => {
           send_receipt: true,
           skip_capture: false,
           payment_method_whitelist: validMethods,
-          due: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minutes from now
+          due: Math.floor(Date.now() / 1000) + (30 * 60) // 30 minutes from now in Unix timestamp
         };
 
         console.log("CHIP Request Body:", JSON.stringify(chipRequestBody));
