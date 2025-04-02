@@ -5580,6 +5580,66 @@ Let me know if you still get the timeout error and I'll help you troubleshoot fu
 
 ---
 
+_**User**_
+
+comprare with origin/master (a51946da91006f165593b230bd59e8f970348460) that is the working payment flow but unoptimized. try to understand what is makin ghte pyament error
+
+---
+
+_**Assistant**_
+
+Let me analyze the differences between the current version and the working version to identify what's causing the payment error.
+
+Looking at the error logs and the code, I notice a few key differences:
+
+1. The working version (a51946da) had a simpler fetch request without the additional connection options we added:
+```typescript
+// Working version
+const response = await fetch(
+  "https://gate.chip-in.asia/api/v1/purchases",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${CHIP_SECRET_KEY.value}`,
+      "Content-Type": "application/json",
+      "Accept": "application/json"
+    },
+    body: JSON.stringify(chipRequestBody),
+    signal: controller.signal
+  }
+);
+```
+
+2. The current version has additional options that might be causing issues:
+```typescript
+{
+  // ... other options ...
+  duplex: 'half',  // This is causing a TypeScript error
+  redirect: 'follow',
+  integrity: undefined,
+  referrer: undefined,
+  referrerPolicy: undefined,
+  timeout: 30000 * attempt // This might be causing issues
+}
+```
+
+Let me modify the code to match the working version while keeping the improved error handling:
+
+
+---
+
+_****_
+
+Cancelled
+
+---
+
+_****_
+
+
+
+---
+
 
 
 ---

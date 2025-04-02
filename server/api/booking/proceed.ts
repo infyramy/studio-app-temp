@@ -453,19 +453,7 @@ export default defineEventHandler(async (event: H3Event) => {
                       "Accept": "application/json"
                     },
                     body: JSON.stringify(chipRequestBody),
-                    signal: controller.signal,
-                    keepalive: true,
-                    cache: 'no-store',
-                    mode: 'cors',
-                    credentials: 'omit',
-                    // Add connection options
-                    duplex: 'half',
-                    redirect: 'follow',
-                    integrity: undefined,
-                    referrer: undefined,
-                    referrerPolicy: undefined,
-                    // Increase timeout for each attempt
-                    timeout: 30000 * attempt // 30s, 60s, 90s
+                    signal: controller.signal
                   }
                 );
                 
