@@ -336,12 +336,13 @@ export default defineEventHandler(async (event: H3Event) => {
       try {
         console.log("CHIP Secret Key:", CHIP_SECRET_KEY.value);
         console.log("CHIP Brand ID:", CHIP_BRAND_ID.value);
-        console.log("Raw Payment Methods:", PAYMENT_METHODS.value);
+        console.log("Raw Payment Methods from DB:", PAYMENT_METHODS?.value);
 
-        if (!PAYMENT_METHODS.value) {
+        if (!PAYMENT_METHODS?.value) {
+          console.error("No payment methods configured in database");
           throw createError({
             statusCode: 400,
-            statusMessage: "Payment methods configuration is missing",
+            statusMessage: "Payment methods configuration is missing. Please configure payment methods in settings.",
           });
         }
 
@@ -355,9 +356,10 @@ export default defineEventHandler(async (event: H3Event) => {
         console.log("Processed Payment Methods:", methods);
 
         if (!methods.length) {
+          console.error("No valid payment methods found after processing");
           throw createError({
             statusCode: 400,
-            statusMessage: "No active payment methods configured. Please check the chip_active_payment_methods configuration.",
+            statusMessage: "No active payment methods configured. Please configure payment methods in settings.",
           });
         }
 
@@ -371,6 +373,7 @@ export default defineEventHandler(async (event: H3Event) => {
         });
 
         if (!validMethods.length) {
+          console.error("No valid payment methods after validation");
           throw createError({
             statusCode: 400,
             statusMessage: "No valid payment methods found. Valid methods are: fpx, credit_card, grabpay, boost, tng",
@@ -415,7 +418,7 @@ export default defineEventHandler(async (event: H3Event) => {
         // Update the makeRequest function with better error handling
         const makeRequest = async () => {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 30000);
+          const timeoutId = setTimeout(() => controller.abort(), 60000); // Increase timeout to 60 seconds
 
           try {
             console.log("Making CHIP API request...");
@@ -430,7 +433,11 @@ export default defineEventHandler(async (event: H3Event) => {
                 },
                 body: JSON.stringify(chipRequestBody),
                 signal: controller.signal,
-                credentials: "omit"
+                // Add additional fetch options for better reliability
+                keepalive: true,
+                cache: 'no-store',
+                mode: 'cors',
+                credentials: 'omit'
               }
             );
             
@@ -447,6 +454,9 @@ export default defineEventHandler(async (event: H3Event) => {
             clearTimeout(timeoutId);
             if (err.name === 'AbortError') {
               throw new Error('Request timed out. Please try again.');
+            }
+            if (err.code === 'UND_ERR_CONNECT_TIMEOUT') {
+              throw new Error('Connection to CHIP API timed out. Please check your network connection.');
             }
             throw err;
           }

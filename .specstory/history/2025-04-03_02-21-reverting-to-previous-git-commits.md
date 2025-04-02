@@ -4232,7 +4232,287 @@ The valid payment methods are:
 - boost
 - tng
 
-Make sure your `chip_active_payment_methods` configuration in t
+Make sure your `chip_active_payment_methods` configuration in the database contains one or more of these values, separated by commas. For example:
+```
+fpx,credit_card
+```
+or
+```
+fpx,grabpay,boost
+```
+
+Let me know what the logs show and I can help you fix the configuration.
+
+---
+
+_**User**_
+
+Failed to process CHIP payment: No active payment methods configured. Please check the chip_active_payment_methods configuration.
+
+---
+
+_**Assistant**_
+
+I see the issue. The error occurs because the `chip_active_payment_methods` configuration is either missing or empty in the database. Let's check the configuration and add the necessary payment methods.
+
+First, let's check what payment methods are currently configured:
+
+
+---
+
+_****_
+
+Cancelled
+
+---
+
+_**User**_
+
+try to find out how the current codebase get its payment method
+
+---
+
+_**Assistant**_
+
+I'll search through the codebase to find how payment methods are configured and retrieved:
+
+
+---
+
+_****_
+
+<details>
+            <summary>Searched codebase "chip_active_payment_methods configuration or payment methods setup" • **25** results</summary>
+        
+| File | Lines |
+|------|-------|
+| `server/api/setting/get-payment-config.ts` | L1-49 |
+| `server/api/setting/update-payment-config.ts` | L1-17 |
+| `pages/dashboard/settings.vue` | L3166-3211 |
+| `server/api/setting/update-payment-config.ts` | L17-96 |
+| `pages/dashboard/settings.vue` | L3898-3965 |
+| `pages/dashboard/settings.vue` | L1056-1089 |
+| `pages/dashboard/settings.vue` | L774-802 |
+| `server/api/setting/get-payment-methods.ts` | L5-50 |
+| `pages/dashboard/settings.vue` | L1089-1108 |
+| `pages/dashboard/settings.vue` | L741-774 |
+| `pages/book-a-session/index.vue` | L1600-1628 |
+| `server/api/setting/get-payment-methods.ts` | L1-5 |
+| `pages/dashboard/settings.vue` | L1036-1056 |
+| `pages/book-a-session/index.vue` | L1628-1663 |
+| `pages/dashboard/settings.vue` | L890-920 |
+| `pages/dashboard/settings.vue` | L802-818 |
+| `server/api/booking/create-payment.ts` | L1-13 |
+| `pages/dashboard/settings.vue` | L2897-2998 |
+| `server/api/booking/create-payment.ts` | L63-117 |
+| `server/api/booking/payment-callback.ts` | L1-31 |
+| `pages/book-a-session/receipt.vue` | L914-971 |
+| `pages/book-a-session/index.vue` | L3022-3076 |
+| `.specstory/history/2025-04-01_14-13-dynamic-title-configuration-in-nuxt-js.md` | L2717-2787 |
+| `pages/book-a-session/index.vue` | L2037-2094 |
+| `.specstory/history/2025-04-03_02-32-chip-payment-processing-error-debugging.md` | L108-155 |
+
+</details>
+
+---
+
+_****_
+
+Based on the codebase search, I can see that the payment methods are configured in the database and managed through the settings page. Let me check the current configuration:
+
+
+---
+
+_****_
+
+Cancelled
+
+---
+
+_**User**_
+
+its clear because we get the active payment method fromapi
+
+---
+
+_**Assistant**_
+
+Ah yes, I see the issue now. Looking at the code, the payment methods are fetched from the CHIP API and stored in the database. Let me check the relevant code:
+
+1. First, there's an API endpoint to get available payment methods:
+```typescript
+// server/api/setting/get-payment-methods.ts
+const chipResponse = await $fetch<ChipResponse>(
+  `https://gate.chip-in.asia/api/v1/payment_methods/?brand_id=${chipBrandId.value}&currency=MYR`,
+  {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${chipSecretKey.value}`,
+      "Content-Type": "application/json",
+    },
+  }
+);
+```
+
+2. Then these methods are saved in the settings:
+```typescript
+// pages/dashboard/settings.vue
+async function savePaymentConfig() {
+  const response = await $apiFetch("/api/setting/update-payment-config", {
+    method: "POST",
+    body: {
+      // ... other settings ...
+      activePaymentMethods: settings.value.activePaymentMethods.join(","),
+    },
+  });
+}
+```
+
+Let me add some logging to help diagnose the issue:
+
+
+---
+
+_****_
+
+```diff
+          console.log("CHIP Secret Key:", CHIP_SECRET_KEY.value);
+          console.log("CHIP Brand ID:", CHIP_BRAND_ID.value);
+-         console.log("Raw Payment Methods:", PAYMENT_METHODS.value);
++         console.log("Raw Payment Methods from DB:", PAYMENT_METHODS?.value);
+  
+-         if (!PAYMENT_METHODS.value) {
++         if (!PAYMENT_METHODS?.value) {
++           console.error("No payment methods configured in database");
+            throw createError({
+              statusCode: 400,
+-             statusMessage: "Payment methods configuration is missing",
++             statusMessage: "Payment methods configuration is missing. Please configure payment methods in settings.",
+            });
+          }
+  
+          if (!methods.length) {
++           console.error("No valid payment methods found after processing");
+            throw createError({
+              statusCode: 400,
+-             statusMessage: "No active payment methods configured. Please check the chip_active_payment_methods configuration.",
++             statusMessage: "No active payment methods configured. Please configure payment methods in settings.",
+            });
+          }
+  
+          if (!validMethods.length) {
++           console.error("No valid payment methods after validation");
+            throw createError({
+              statusCode: 400,
+```
+
+---
+
+_****_
+
+I've added more detailed logging to help diagnose the issue. The problem is that the payment methods are not properly configured in the database. Here's what you need to do:
+
+1. Go to the settings page in your dashboard
+2. Enable CHIP payment gateway if not already enabled
+3. Configure the payment methods by selecting at least one of these valid methods:
+   - fpx
+   - credit_card
+   - grabpay
+   - boost
+   - tng
+
+The error occurs because:
+1. Either no payment methods are configured in the database
+2. Or the configured methods are invalid
+
+The logs will now show:
+1. The raw value from the database
+2. The processed array of methods
+3. Any invalid methods found
+4. The final list of valid methods
+
+Try these steps:
+1. Go to your dashboard settings
+2. Enable CHIP payment gateway
+3. Select at least one payment method (e.g., "credit_card,fpx")
+4. Save the settings
+5. Try the payment process again
+
+The error message should now be more descriptive and help you identify exactly what's missing in the configuration. Let me know if you need help with any of these steps.
+
+---
+
+_**User**_
+
+CHIP Request Body: {"brand_id":"dead8838-9c92-4bd4-b5ad-83b9c9ac1e6e","reference":"BOOKING-521","platform":"web","purchase":{"products":[{"name":"Booking Session","price":12000}],"currency":"MYR"},"client":{"full_name":"test","email":"stitchnstudio25@yahoo.com","phone":"601114401720"},"success_callback":"https://teststudio.0o0.my/api/booking/payment-callback","success_redirect":"https://teststudio.0o0.my/book-a-session/receipt?booking=RCP1743625437284339&status=success","failure_redirect":"https://teststudio.0o0.my/book-a-session/failed-payment?booking=RCP1743625437284339&status=failed","cancel_redirect":"https://teststudio.0o0.my/book-a-session/failed-payment?booking=RCP1743625437284339&status=cancelled","send_receipt":true,"skip_capture":false,"payment_method_whitelist":["fpx"],"due":"2025-04-02T20:53:57.286Z"}
+Starting CHIP payment process...
+Making CHIP API request...
+Attempt 1 failed: TypeError: fetch failed
+at node:internal/deps/undici/undici:12637:11
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+at async makeRequest (file:///app/server/chunks/routes/api/booking/proceed.mjs:239:30)
+at async retry (file:///app/server/chunks/routes/api/booking/proceed.mjs:28:24)
+at async Object.handler (file:///app/server/chunks/routes/api/booking/proceed.mjs:269:30)
+at async Object.handler (file:///app/server/chunks/nitro/nitro.mjs:3161:19)
+at async Server.toNodeHandle (file:///app/server/chunks/nitro/nitro.mjs:3432:7) {
+cause: ConnectTimeoutError: Connect Timeout Error
+at onConnectTimeout (node:internal/deps/undici/undici:7771:28)
+at node:internal/deps/undici/undici:7727:50
+at Immediate._onImmediate (node:internal/deps/undici/undici:7759:13)
+at process.processImmediate (node:internal/timers:476:21) {
+code: 'UND_ERR_CONNECT_TIMEOUT'
+}
+}
+Making CHIP API request...
+Attempt 2 failed: TypeError: fetch failed
+at node:internal/deps/undici/undici:12637:11
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+at async makeRequest (file:///app/server/chunks/routes/api/booking/proceed.mjs:239:30)
+at async retry (file:///app/server/chunks/routes/api/booking/proceed.mjs:28:24)
+at async Object.handler (file:///app/server/chunks/routes/api/booking/proceed.mjs:269:30)
+at async Object.handler (file:///app/server/chunks/nitro/nitro.mjs:3161:19)
+at async Server.toNodeHandle (file:///app/server/chunks/nitro/nitro.mjs:3432:7) {
+cause: ConnectTimeoutError: Connect Timeout Error
+at onConnectTimeout (node:internal/deps/undici/undici:7771:28)
+at node:internal/deps/undici/undici:7727:50
+at Immediate._onImmediate (node:internal/deps/undici/undici:7759:13)
+at process.processImmediate (node:internal/timers:476:21) {
+code: 'UND_ERR_CONNECT_TIMEOUT'
+}
+}
+
+---
+
+_**Assistant**_
+
+I see the issue. The request is failing with a connection timeout error when trying to connect to the CHIP API. Let's improve the connection handling and add better error handling:
+
+
+
+---
+
+_****_
+
+
+
+---
+
+_****_
+
+Let me try a different approach to fix the connection timeout issue:
+
+
+---
+
+_****_
+
+Cancelled
+
+---
+
+_****_
+
+
 
 ---
 
