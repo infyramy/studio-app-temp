@@ -416,14 +416,27 @@ export default defineEventHandler(async (event: H3Event) => {
         console.log("CHIP Request Body:", JSON.stringify(chipRequestBody));
         console.log("Using API URL:", process.env.PUBLIC_API_URL);
         console.log("Using Public URL:", process.env.PUBLIC_URL);
+        console.log("CHIP Secret Key length:", CHIP_SECRET_KEY.value.length);
+        console.log("CHIP Brand ID:", CHIP_BRAND_ID.value);
+        console.log("Valid Payment Methods:", validMethods);
+        console.log("Payment Amount:", body.payment_amount);
+        console.log("Payment Type:", body.payment_type);
 
         // Update the makeRequest function with better error handling
         const makeRequest = async () => {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 60000); // Increase timeout to 60 seconds
+          const timeoutId = setTimeout(() => controller.abort(), 60000);
 
           try {
             console.log("Making CHIP API request...");
+            
+            // Log the full request details
+            console.log("Request URL:", "https://gate.chip-in.asia/api/v1/purchases");
+            console.log("Request Headers:", {
+              "Authorization": `Bearer ${CHIP_SECRET_KEY.value.substring(0, 10)}...`,
+              "Content-Type": "application/json",
+              "Accept": "application/json"
+            });
             
             // First try to resolve the domain
             try {
@@ -431,7 +444,8 @@ export default defineEventHandler(async (event: H3Event) => {
               if (!dns.ok) {
                 throw new Error('Failed to resolve CHIP API domain');
               }
-              console.log("DNS resolution successful");
+              const dnsData = await dns.json();
+              console.log("DNS resolution successful:", dnsData);
             } catch (dnsError) {
               console.error("DNS resolution failed:", dnsError);
               throw new Error('Failed to resolve CHIP API domain. Please check your network connection.');
@@ -453,7 +467,6 @@ export default defineEventHandler(async (event: H3Event) => {
                     },
                     body: JSON.stringify(chipRequestBody),
                     signal: controller.signal,
-                    // Add additional fetch options for better reliability
                     keepalive: true,
                     cache: 'no-store',
                     mode: 'cors',
@@ -466,6 +479,9 @@ export default defineEventHandler(async (event: H3Event) => {
                 if (!response.ok) {
                   const errorData = await response.json().catch(() => ({}));
                   console.error("CHIP API Error Response:", errorData);
+                  console.error("Response Status:", response.status);
+                  console.error("Response Status Text:", response.statusText);
+                  console.error("Response Headers:", Object.fromEntries(response.headers.entries()));
                   throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
                 }
                 
@@ -473,9 +489,13 @@ export default defineEventHandler(async (event: H3Event) => {
               } catch (err: any) {
                 lastError = err;
                 console.error(`Attempt ${attempt} failed:`, err);
+                console.error("Error details:", {
+                  name: err.name,
+                  message: err.message,
+                  stack: err.stack
+                });
                 
                 if (attempt < 3) {
-                  // Wait before retrying
                   await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
                   continue;
                 }
