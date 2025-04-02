@@ -414,6 +414,8 @@ export default defineEventHandler(async (event: H3Event) => {
         };
 
         console.log("CHIP Request Body:", JSON.stringify(chipRequestBody));
+        console.log("Using API URL:", process.env.PUBLIC_API_URL);
+        console.log("Using Public URL:", process.env.PUBLIC_URL);
 
         // Update the makeRequest function with better error handling
         const makeRequest = async () => {
