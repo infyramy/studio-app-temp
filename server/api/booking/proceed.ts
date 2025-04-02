@@ -336,6 +336,14 @@ export default defineEventHandler(async (event: H3Event) => {
       try {
         console.log("CHIP Secret Key:", CHIP_SECRET_KEY.value);
         console.log("CHIP Brand ID:", CHIP_BRAND_ID.value);
+        console.log("Raw Payment Methods:", PAYMENT_METHODS.value);
+
+        if (!PAYMENT_METHODS.value) {
+          throw createError({
+            statusCode: 400,
+            statusMessage: "Payment methods configuration is missing",
+          });
+        }
 
         // Convert comma-separated payment methods to array
         const methods = PAYMENT_METHODS.value
@@ -344,14 +352,32 @@ export default defineEventHandler(async (event: H3Event) => {
           .map((method: string) => method.trim().replace(/\s+/g, ""))
           .filter(Boolean); // Remove empty entries
 
-        console.log("Payment Methods:", methods);
+        console.log("Processed Payment Methods:", methods);
 
         if (!methods.length) {
           throw createError({
             statusCode: 400,
-            statusMessage: "No active payment methods configured",
+            statusMessage: "No active payment methods configured. Please check the chip_active_payment_methods configuration.",
           });
         }
+
+        // Validate each payment method
+        const validMethods = methods.filter(method => {
+          const isValid = ['fpx', 'credit_card', 'grabpay', 'boost', 'tng'].includes(method.toLowerCase());
+          if (!isValid) {
+            console.warn(`Invalid payment method found: ${method}`);
+          }
+          return isValid;
+        });
+
+        if (!validMethods.length) {
+          throw createError({
+            statusCode: 400,
+            statusMessage: "No valid payment methods found. Valid methods are: fpx, credit_card, grabpay, boost, tng",
+          });
+        }
+
+        console.log("Valid Payment Methods:", validMethods);
 
         // Create the request body
         const chipRequestBody = {
@@ -380,7 +406,7 @@ export default defineEventHandler(async (event: H3Event) => {
           cancel_redirect: `${process.env.PUBLIC_URL}/book-a-session/failed-payment?booking=${receiptNumber}&status=cancelled`,
           send_receipt: true,
           skip_capture: false,
-          payment_method_whitelist: methods,
+          payment_method_whitelist: validMethods,
           due: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minutes from now
         };
 
