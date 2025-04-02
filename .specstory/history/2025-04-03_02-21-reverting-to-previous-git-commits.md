@@ -3743,6 +3743,105 @@ refer @https://docs.chip-in.asia/chip-collect/overview/online-purchases , @https
 
 _**Assistant**_
 
+Based on the CHIP API documentation, I notice a few issues with our current implementation. Let me fix them:
+
+1. The API endpoint should be `https://gate.chip-in.asia/api/v1/purchases` (not `api.chip-in.asia`)
+2. The request body structure needs some adjustments
+3. We need to properly handle the payment methods whitelist
+
+Let me update the code:
+
+
+
+---
+
+_****_
+
+```diff
+              full_name: body.name,
+              email: body.email,
++             phone: body.phone,
+            },
+            success_callback: `${process.env.PUBLIC_API_URL}/booking/payment-callback`,
+            send_receipt: true,
+            skip_capture: false,
++           payment_method_whitelist: methods,
+          };
+- 
+-         // Create request body string with explicit double quotes for payment methods
+-         // const requestBody = `${JSON.stringify(chipRequestBody).slice(0, -1)},"payment_method_whitelist":["${methods.join('","')}"]}`
+  
+          console.log("CHIP Request Body:", JSON.stringify(chipRequestBody));
+            try {
+              const response = await fetch(
+-               "https://api.chip-in.asia/api/v1/purchases", // Updated API endpoint
++               "https://gate.chip-in.asia/api/v1/purchases",
+                {
+                  method: "POST",
+                    "Accept": "application/json"
+                  },
+-                 body: JSON.stringify({
+-                   ...chipRequestBody,
+-                   payment_method_whitelist: methods // Add payment methods whitelist
+-                 }),
++                 body: JSON.stringify(chipRequestBody),
+                  signal: AbortSignal.timeout(10000),
+                  credentials: "omit"
+              
+              return response;
+-           } catch (err) {
++           } catch (err: any) {
+              clearTimeout(timeoutId);
+              if (err.name === 'AbortError' || err.message.includes('timed out')) {
+```
+
+---
+
+_****_
+
+I've made several important changes to fix the CHIP API integration:
+
+1. Fixed the API endpoint to use `https://gate.chip-in.asia/api/v1/purchases` (the correct endpoint according to docs)
+2. Added `phone` to the client information in the request body
+3. Moved `payment_method_whitelist` to the root level of the request body
+4. Fixed the error handling type by adding `: any` to the catch clause
+5. Removed the commented-out code for payment methods whitelist since we're now handling it properly
+6. Simplified the request body structure to match the API documentation
+
+The changes should resolve the 404 error by:
+1. Using the correct API endpoint
+2. Properly structuring the request body according to the API documentation
+3. Including all required fields in the correct format
+
+The remaining linter errors are unrelated to the CHIP API integration and are about missing utility functions for formatting. Would you like me to address those as well?
+
+Please try the payment process again with these changes. The request should now match the CHIP API documentation exactly.
+
+---
+
+_**User**_
+
+but pls fix the main issue, cannot proceed to chip. but before this can
+
+---
+
+_**Assistant**_
+
+Looking at the logs and the CHIP API documentation, I notice that we need to make a few adjustments to fix the payment processing. The main issue seems to be with the request structure and payment methods handling.
+
+Let me modify the code:
+
+
+---
+
+_****_
+
+Cancelled
+
+---
+
+_****_
+
 
 
 ---

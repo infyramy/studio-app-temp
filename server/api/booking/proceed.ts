@@ -373,6 +373,7 @@ export default defineEventHandler(async (event: H3Event) => {
           send_receipt: true,
           skip_capture: false,
           payment_method_whitelist: methods,
+          due: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minutes from now
         };
 
         console.log("CHIP Request Body:", JSON.stringify(chipRequestBody));
@@ -425,7 +426,7 @@ export default defineEventHandler(async (event: H3Event) => {
         console.log("CHIP Response Status Text:", chipResponse.statusText);
 
         const chipData = await chipResponse.json();
-        // console.log("CHIP Data:", chipData);
+        console.log("CHIP Data:", chipData);
 
         if (chipResponse.status !== 201) {
           // If CHIP payment initialization fails, update booking status to failed
@@ -440,65 +441,68 @@ export default defineEventHandler(async (event: H3Event) => {
         }
 
         // Update booking with CHIP purchase ID
-            // await knex("booking")
-            //   .where("id", bookingId)
-            //   .update({ chip_purchase_id: chipData.id });
+        await knex("booking")
+          .where("id", bookingId)
+          .update({ 
+            chip_purchase_id: chipData.id,
+            payment_initiated_at: new Date().toISOString()
+          });
 
-            return {
-              status: "success",
-              message: "Booking created and payment initialized successfully",
-              data: {
-                booking_id: bookingId,
-                receipt_number: receiptNumber,
-                checkout_url: chipData.checkout_url,
-                purchase_id: chipData.id,
-              },
-            };
-          } catch (error: any) {
-            console.error("CHIP payment outer error:", error);
-            
-            // Update booking status to failed
-            await knex("booking").where("id", bookingId).update({ 
-              status: 4 // 4 = Failed
-            });
+        return {
+          status: "success",
+          message: "Booking created and payment initialized successfully",
+          data: {
+            booking_id: bookingId,
+            receipt_number: receiptNumber,
+            checkout_url: chipData.checkout_url,
+            purchase_id: chipData.id,
+          },
+        };
+      } catch (error: any) {
+        console.error("CHIP payment outer error:", error);
+        
+        // Update booking status to failed
+        await knex("booking").where("id", bookingId).update({ 
+          status: 4 // 4 = Failed
+        });
 
-            throw createError({
-              statusCode: error.statusCode || 500,
-              statusMessage: `Failed to process CHIP payment: ${error.message}`,
-            });
-          }
-        } else {
-          // Manual Payment
+        throw createError({
+          statusCode: error.statusCode || 500,
+          statusMessage: `Failed to process CHIP payment: ${error.message}`,
+        });
+      }
+    } else {
+      // Manual Payment
 
-          const adminPhoneNumber = await knex("config")
-            .select("value")
-            .where("code", "admin_phoneno")
-            .first();
+      const adminPhoneNumber = await knex("config")
+        .select("value")
+        .where("code", "admin_phoneno")
+        .first();
 
-          // Send WhatsApp notification to admin
-          await sendWhatsAppNotification(
-            adminPhoneNumber.value,
-            receiptNumber,
-            "admin"
-          );
+      // Send WhatsApp notification to admin
+      await sendWhatsAppNotification(
+        adminPhoneNumber.value,
+        receiptNumber,
+        "admin"
+      );
 
-          // Send WhatsApp notification to customer
-          await sendWhatsAppNotification(body.phone, receiptNumber, "customer");
+      // Send WhatsApp notification to customer
+      await sendWhatsAppNotification(body.phone, receiptNumber, "customer");
 
-          return {
-            status: "success",
-            message: "Booking created successfully",
-            // data: `${process.env.PUBLIC_URL}/book-a-session/receipt-qr?booking=${receiptNumber}&status=success`,
-            data: `/book-a-session/receipt-qr?booking=${receiptNumber}&status=success`,
-          };
-        }
-    } catch (error: any) {
-      throw createError({
-        statusCode: error.statusCode || 500,
-        statusMessage: error.message || "Internal server error",
-      });
+      return {
+        status: "success",
+        message: "Booking created successfully",
+        // data: `${process.env.PUBLIC_URL}/book-a-session/receipt-qr?booking=${receiptNumber}&status=success`,
+        data: `/book-a-session/receipt-qr?booking=${receiptNumber}&status=success`,
+      };
     }
-  });
+  } catch (error: any) {
+    throw createError({
+      statusCode: error.statusCode || 500,
+      statusMessage: error.message || "Internal server error",
+    });
+  }
+});
 
 // Add these utility functions at the top with other functions
 function delay(ms: number): Promise<void> {
