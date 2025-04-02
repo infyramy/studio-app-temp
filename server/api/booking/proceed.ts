@@ -422,34 +422,65 @@ export default defineEventHandler(async (event: H3Event) => {
 
           try {
             console.log("Making CHIP API request...");
-            const response = await fetch(
-              "https://gate.chip-in.asia/api/v1/purchases",
-              {
-                method: "POST",
-                headers: {
-                  "Authorization": `Bearer ${CHIP_SECRET_KEY.value}`,
-                  "Content-Type": "application/json",
-                  "Accept": "application/json"
-                },
-                body: JSON.stringify(chipRequestBody),
-                signal: controller.signal,
-                // Add additional fetch options for better reliability
-                keepalive: true,
-                cache: 'no-store',
-                mode: 'cors',
-                credentials: 'omit'
+            
+            // First try to resolve the domain
+            try {
+              const dns = await fetch('https://dns.google/resolve?name=gate.chip-in.asia');
+              if (!dns.ok) {
+                throw new Error('Failed to resolve CHIP API domain');
               }
-            );
-            
-            clearTimeout(timeoutId);
-            
-            if (!response.ok) {
-              const errorData = await response.json().catch(() => ({}));
-              console.error("CHIP API Error Response:", errorData);
-              throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+              console.log("DNS resolution successful");
+            } catch (dnsError) {
+              console.error("DNS resolution failed:", dnsError);
+              throw new Error('Failed to resolve CHIP API domain. Please check your network connection.');
+            }
+
+            // Try to connect to CHIP API with retries
+            let lastError = null;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              try {
+                console.log(`Attempt ${attempt} to connect to CHIP API...`);
+                const response = await fetch(
+                  "https://gate.chip-in.asia/api/v1/purchases",
+                  {
+                    method: "POST",
+                    headers: {
+                      "Authorization": `Bearer ${CHIP_SECRET_KEY.value}`,
+                      "Content-Type": "application/json",
+                      "Accept": "application/json"
+                    },
+                    body: JSON.stringify(chipRequestBody),
+                    signal: controller.signal,
+                    // Add additional fetch options for better reliability
+                    keepalive: true,
+                    cache: 'no-store',
+                    mode: 'cors',
+                    credentials: 'omit'
+                  }
+                );
+                
+                clearTimeout(timeoutId);
+                
+                if (!response.ok) {
+                  const errorData = await response.json().catch(() => ({}));
+                  console.error("CHIP API Error Response:", errorData);
+                  throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+                }
+                
+                return response;
+              } catch (err: any) {
+                lastError = err;
+                console.error(`Attempt ${attempt} failed:`, err);
+                
+                if (attempt < 3) {
+                  // Wait before retrying
+                  await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+                  continue;
+                }
+              }
             }
             
-            return response;
+            throw lastError;
           } catch (err: any) {
             clearTimeout(timeoutId);
             if (err.name === 'AbortError') {

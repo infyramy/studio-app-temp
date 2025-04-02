@@ -4506,13 +4506,355 @@ Let me try a different approach to fix the connection timeout issue:
 
 _****_
 
-Cancelled
+```diff
+          const makeRequest = async () => {
+            const controller = new AbortController();
+-           const timeoutId = setTimeout(() => controller.abort(), 30000);
++           const timeoutId = setTimeout(() => controller.abort(), 60000); // Increase timeout to 60 seconds
+  
+            try {
+                  body: JSON.stringify(chipRequestBody),
+                  signal: controller.signal,
+-                 credentials: "omit"
++                 // Add additional fetch options for better reliability
++                 keepalive: true,
++                 cache: 'no-store',
++                 mode: 'cors',
++                 credentials: 'omit'
+                }
+              );
+                throw new Error('Request timed out. Please try again.');
+              }
++             if (err.code === 'UND_ERR_CONNECT_TIMEOUT') {
++               throw new Error('Connection to CHIP API timed out. Please check your network connection.');
++             }
+              throw err;
+            }
+```
 
 ---
 
 _****_
 
+I've made several improvements to handle the connection timeout issue:
 
+1. Increased the timeout from 30 seconds to 60 seconds
+2. Added better fetch options:
+   - `keepalive: true` - Keeps the connection alive
+   - `cache: 'no-store'` - Prevents caching issues
+   - `mode: 'cors'` - Proper CORS handling
+   - `credentials: 'omit'` - No credentials needed
+
+3. Added specific error handling for connection timeouts:
+   ```typescript
+   if (err.code === 'UND_ERR_CONNECT_TIMEOUT') {
+     throw new Error('Connection to CHIP API timed out. Please check your network connection.');
+   }
+   ```
+
+The connection timeout error suggests there might be network connectivity issues. Here are a few things to check:
+
+1. Verify that your server can reach `gate.chip-in.asia`
+2. Check if there are any firewall rules blocking the connection
+3. Verify that the CHIP API endpoint is accessible from your server's location
+
+You can test the connection using:
+
+
+---
+
+_****_
+
+```bash
+curl -v https://gate.chip-in.asia/api/v1/payment_methods/
+```
+
+```
+* Host gate.chip-in.asia:443 was resolved.
+* IPv6: (none)
+* IPv4: 18.140.253.150
+*   Trying 18.140.253.150:443...
+* Connected to gate.chip-in.asia (18.140.253.150) port 443
+* ALPN: curl offers h2,http/1.1
+* (304) (OUT), TLS handshake, Client hello (1):
+*  CAfile: /etc/ssl/cert.pem
+*  CApath: none
+* (304) (IN), TLS handshake, Server hello (2):
+* (304) (OUT), TLS handshake, Client hello (1):
+* (304) (IN), TLS handshake, Server hello (2):
+* (304) (IN), TLS handshake, Unknown (8):
+* (304) (IN), TLS handshake, Certificate (11):
+* (304) (IN), TLS handshake, CERT verify (15):
+* (304) (IN), TLS handshake, Finished (20):
+* (304) (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / AEAD-AES256-GCM-SHA384 / [blank] / UNDEF
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=gate.chip-in.asia
+*  start date: Mar 20 07:49:45 2025 GMT
+*  expire date: Jun 18 07:49:44 2025 GMT
+*  subjectAltName: host "gate.chip-in.asia" matched cert's "gate.chip-in.asia"
+*  issuer: C=US; O=Let's Encrypt; CN=R11
+*  SSL certificate verify ok.
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://gate.chip-in.asia/api/v1/payment_method
+s/
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: gate.chip-in.asia]
+* [HTTP/2] [1] [:path: /api/v1/payment_methods/]
+* [HTTP/2] [1] [user-agent: curl/8.7.1]
+* [HTTP/2] [1] [accept: */*]
+> GET /api/v1/payment_methods/ HTTP/2
+> Host: gate.chip-in.asia
+> User-Agent: curl/8.7.1
+> Accept: */*
+> 
+* Request completely sent off
+< HTTP/2 401 
+< server: nginx
+< date: Wed, 02 Apr 2025 20:25:23 GMT
+< content-type: application/json
+< content-length: 87
+< www-authenticate: Bearer
+< allow: GET, HEAD, OPTIONS
+< x-frame-options: DENY
+< strict-transport-security: max-age=31536000
+< x-content-type-options: nosniff
+< referrer-policy: same-origin
+< cross-origin-opener-policy: same-origin-allow-popups
+< vary: origin
+< 
+* Connection #0 to host gate.chip-in.asia left intact
+{"__all__":[{"message":"Authorization header missing","code":"authentication_fai
+led"}]}%                    
+
+```
+
+---
+
+_****_
+
+The curl test shows that the CHIP API endpoint is accessible, but returns a 401 Unauthorized error (which is expected since we didn't include the authorization token). This confirms that the basic connectivity is working.
+
+Let's try one more thing - let's add a DNS resolution check before making the request:
+
+
+---
+
+_****_
+
+```diff
+            try {
+              console.log("Making CHIP API request...");
++             
++             // First try to resolve the domain
++             try {
++               const dns = await fetch('https://dns.google/resolve?name=gate.chip-in.asia');
++               if (!dns.ok) {
++                 throw new Error('Failed to resolve CHIP API domain');
++               }
++               console.log("DNS resolution successful");
++             } catch (dnsError) {
++               console.error("DNS resolution failed:", dnsError);
++               throw new Error('Failed to resolve CHIP API domain. Please check your network connection.');
++             }
++ 
+              const response = await fetch(
+                "https://gate.chip-in.asia/api/v1/purchases",
+```
+
+---
+
+_****_
+
+I've added a DNS resolution check before making the CHIP API request. This will help us identify if the issue is with DNS resolution or the actual connection to the CHIP API.
+
+The changes include:
+1. Added a DNS resolution check using Google's DNS API
+2. Better error handling for DNS resolution failures
+3. More detailed logging
+
+Try the payment process again. The logs will now show:
+1. Whether DNS resolution was successful
+2. If there are any DNS-related issues
+3. More detailed connection information
+
+If you still get the connection timeout error, please check:
+1. Your server's network configuration
+2. Any firewall rules that might be blocking the connection
+3. The server's DNS settings
+
+Also, you might want to try:
+1. Using a different DNS server
+2. Checking if there are any proxy settings that might be interfering
+3. Verifying that your server's network allows outbound HTTPS connections
+
+Let me know what the logs show with these changes, and we can further diagnose the issue.
+
+---
+
+_**User**_
+
+you need to check back the payment flow, why this is happen and is it related to this
+
+---
+
+_**Assistant**_
+
+Let me analyze the payment flow and the connection timeout issue:
+
+1. Current Payment Flow:
+```typescript
+// 1. Create booking record with status 1 (Pending)
+const [bookingId] = await knex("booking").insert({...});
+
+// 2. If payment_method is 1 (CHIP), initialize CHIP payment
+if (body.payment_method === 1) {
+  // 3. Get CHIP configuration
+  const CHIP_SECRET_KEY = await knex("config").where("code", "chip_key").first();
+  const CHIP_BRAND_ID = await knex("config").where("code", "chip_brand_id").first();
+  const PAYMENT_METHODS = await knex("config").where("code", "chip_active_payment_methods").first();
+
+  // 4. Validate payment methods
+  const methods = PAYMENT_METHODS.value.split(",").map(...);
+  const validMethods = methods.filter(...);
+
+  // 5. Create CHIP request body
+  const chipRequestBody = {
+    brand_id: CHIP_BRAND_ID.value,
+    reference: `BOOKING-${bookingId}`,
+    // ... other fields ...
+    payment_method_whitelist: validMethods,
+  };
+
+  // 6. Make request to CHIP API
+  const chipResponse = await retry(makeRequest, 3, 5000);
+}
+```
+
+The issue appears to be in the connection to the CHIP API. Let's check a few things:
+
+1. The request is timing out after 10 seconds, but we've set it to 60 seconds in the code. This suggests the changes might not be deployed.
+
+2. The error occurs at the connection level:
+```
+cause: ConnectTimeoutError: Connect Timeout Error
+code: 'UND_ERR_CONNECT_TIMEOUT'
+```
+
+3. Looking at the request body, everything seems correct:
+```json
+{
+  "brand_id": "dead8838-9c92-4bd4-b5ad-83b9c9ac1e6e",
+  "reference": "BOOKING-521",
+  "platform": "web",
+  "purchase": {
+    "products": [{"name": "Booking Session", "price": 12000}],
+    "currency": "MYR"
+  },
+  "client": {
+    "full_name": "test",
+    "email": "stitchnstudio25@yahoo.com",
+    "phone": "601114401720"
+  },
+  "payment_method_whitelist": ["fpx"],
+  // ... other fields ...
+}
+```
+
+Let me modify the code to improve the connection handling:
+
+
+---
+
+_****_
+
+```diff
+              }
+  
++             // Try to connect to CHIP API with retries
++             let lastError = null;
++             for (let attempt = 1; attempt <= 3; attempt++) {
++               try {
++                 console.log(`Attempt ${attempt} to connect to CHIP API...`);
+                  const response = await fetch(
+                    "https://gate.chip-in.asia/api/v1/purchases",
+                  
+                  return response;
++               } catch (err: any) {
++                 lastError = err;
++                 console.error(`Attempt ${attempt} failed:`, err);
++                 
++                 if (attempt < 3) {
++                   // Wait before retrying
++                   await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
++                   continue;
++                 }
++               }
++             }
++             
++             throw lastError;
+            } catch (err: any) {
+              clearTimeout(timeoutId);
+```
+
+---
+
+_****_
+
+I've made several improvements to the payment flow:
+
+1. Added nested retry mechanism:
+   - Outer retry (3 attempts with 5-second delays)
+   - Inner retry (3 attempts with 2-second delays)
+   - This gives us 9 total attempts with proper backoff
+
+2. Added better error handling:
+   - DNS resolution check before making the request
+   - Specific error handling for connection timeouts
+   - Better logging at each step
+
+3. Improved connection options:
+   - `keepalive: true` to maintain connection
+   - `cache: 'no-store'` to prevent caching issues
+   - `mode: 'cors'` for proper CORS handling
+   - `credentials: 'omit'` since we don't need credentials
+
+The connection timeout issue could be happening for several reasons:
+1. Network connectivity issues between your server and CHIP's API
+2. DNS resolution problems
+3. Firewall or proxy settings blocking the connection
+4. CHIP API server being temporarily unavailable
+
+To troubleshoot:
+1. Check if your server can reach `gate.chip-in.asia`:
+```bash
+ping gate.chip-in.asia
+```
+
+2. Check if there are any firewall rules blocking outbound HTTPS connections:
+```bash
+telnet gate.chip-in.asia 443
+```
+
+3. Verify your server's DNS settings:
+```bash
+nslookup gate.chip-in.asia
+```
+
+4. Check if you can access the CHIP API through a different method (like curl):
+```bash
+curl -v https://gate.chip-in.asia/api/v1/payment_methods/
+```
+
+The changes I've made should make the connection more reliable by:
+1. Adding multiple retry attempts
+2. Implementing proper backoff delays
+3. Adding better error handling and logging
+4. Using more reliable connection options
+
+Try the payment process again. If it still fails, please share the new logs and we can further diagnose the issue.
 
 ---
 
