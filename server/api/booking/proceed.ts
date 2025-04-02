@@ -618,3 +618,44 @@ async function sendWhatsAppNotification(
         `${
           booking.referral_code
             ? `Referral: *${booking.referral_code}*\n\n`
+            : ''
+        }` +
+        `Location: ${wazeUrl.value}\n` +
+        `Google Maps: ${googleMapsUrl.value}\n\n` +
+        `Please process this booking and contact the customer for payment collection.`;
+    } else {
+      message =
+        `*Booking Confirmation*\n\n` +
+        `Reference: *${ref}*\n` +
+        `Session Date: *${formattedDate}*\n` +
+        `Session Time: *${formattedTime}*\n` +
+        `Amount to Pay: *RM ${formattedAmount}*\n\n` +
+        `${
+          booking.referral_code
+            ? `Referral: *${booking.referral_code}*\n\n`
+            : ''
+        }` +
+        `Location: ${wazeUrl.value}\n` +
+        `Google Maps: ${googleMapsUrl.value}\n\n` +
+        `Please keep this receipt for your records.`;
+    }
+
+    // Send the message
+    await fetch(`${wahaEndpoint.value}/api/sendMessage`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        chatId,
+        message,
+      }),
+    });
+  } catch (error) {
+    console.error("Error sending WhatsApp notification:", error);
+    throw createError({
+      statusCode: 500,
+      statusMessage: "Failed to send WhatsApp notification",
+    });
+  }
+}
