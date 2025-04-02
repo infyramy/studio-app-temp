@@ -132,39 +132,29 @@ export default defineEventHandler(async (event: H3Event) => {
 
       // Only send notifications if this is a new payment ID
       if (existingPayment?.chip_purchase_id !== chipPaymentId) {
-        const wahaEndpoint = await knex("config")
-          .select("value")
-          .where("code", "waha_endpoint")
-          .first();
+        // Get all config values in a single query
+        const configValues = await knex("config")
+          .select("code", "value")
+          .whereIn("code", [
+            "waha_endpoint",
+            "admin_phoneno",
+            "waze_url",
+            "google_maps_url"
+          ]);
 
-        // Send WhatsApp notification to admin
-        const adminPhoneNumber = await knex("config")
-          .select("value")
-          .where("code", "admin_phoneno")
-          .first();
+        // Convert to object for easier access
+        const config = Object.fromEntries(
+          configValues.map(row => [row.code, row.value])
+        );
 
-        // Get waze url
-        const wazeUrl = await knex("config")
-          .select("value")
-          .where("code", "waze_url")
-          .first();
-        console.log("Waze URL:", wazeUrl);
-
-        // Get google maps url
-        const googleMapsUrl = await knex("config")
-          .select("value")
-          .where("code", "google_maps_url")
-          .first();
-        console.log("Google Maps URL:", googleMapsUrl);
-
-        if (adminPhoneNumber) {
+        if (config.admin_phoneno) {
           await sendWhatsAppNotification(
             "admin",
-            adminPhoneNumber.value,
+            config.admin_phoneno,
             booking,
-            wahaEndpoint.value,
-            wazeUrl.value,
-            googleMapsUrl.value
+            config.waha_endpoint,
+            config.waze_url,
+            config.google_maps_url
           );
         }
 
@@ -175,11 +165,12 @@ export default defineEventHandler(async (event: H3Event) => {
             "customer",
             userPhoneNumber,
             booking,
-            wahaEndpoint.value,
-            wazeUrl.value,
-            googleMapsUrl.value
+            config.waha_endpoint,
+            config.waze_url,
+            config.google_maps_url
           );
         }
+
         // Create calendar event
         console.log(
           "----------------------- CREATE CALENDAR EVENT START -----------------------"

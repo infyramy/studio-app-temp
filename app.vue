@@ -1,3 +1,14 @@
+<script setup lang="ts">
+import { onMounted } from 'vue'
+import { useSiteConfig } from '~/composables/useTitle'
+
+const { updateConfig } = useSiteConfig()
+
+onMounted(async () => {
+  await updateConfig()
+})
+</script>
+
 <template>
   <div>
     <NuxtLayout>
