@@ -1,70 +1,94 @@
-import { H3Event } from 'h3'
+import { defineEventHandler, createError } from "h3";
+import knex from "~/server/utils/knex";
+import { redis } from "~/server/utils/redis";
 
-const CHIP_SECRET_KEY = process.env.CHIP_SECRET_KEY
-const CACHE_DURATION = 30000 // 30 seconds cache
-const statusCache = new Map<string, { status: string; timestamp: number }>()
+const CACHE_DURATION = 60; // 1 minute cache
+const STATUS_MAP = {
+  1: "pending",
+  2: "partial",
+  3: "completed",
+  4: "failed",
+} as const;
 
-export default defineEventHandler(async (event: H3Event) => {
+export default defineEventHandler(async (event) => {
   try {
-    const query = getQuery(event)
-    const purchaseId = query.purchase_id
+    const query = getQuery(event);
+    const purchaseId = query.purchase_id as string;
 
     if (!purchaseId) {
       throw createError({
         statusCode: 400,
-        statusMessage: 'Purchase ID is required',
-      })
+        message: "Purchase ID is required",
+      });
     }
 
-    // Check cache first
-    const cachedStatus = statusCache.get(purchaseId as string)
-    if (cachedStatus && Date.now() - cachedStatus.timestamp < CACHE_DURATION) {
+    // Try to get status from Redis cache first
+    const cacheKey = `payment_status:${purchaseId}`;
+    const cachedStatus = await redis.get(cacheKey);
+    
+    if (cachedStatus) {
       return {
-        status: cachedStatus.status,
-        chipStatus: cachedStatus.status,
+        status: STATUS_MAP[cachedStatus as keyof typeof STATUS_MAP] || cachedStatus,
+        message: "Payment status retrieved from cache",
         cached: true
+      };
+    }
+
+    // If not in cache, check database with retry logic
+    let retries = 3;
+    let booking = null;
+
+    while (retries > 0 && !booking) {
+      try {
+        [booking] = await knex("booking")
+          .select("status")
+          .where("payment_ref_number", purchaseId)
+          .limit(1);
+      } catch (err) {
+        retries--;
+        if (retries === 0) throw err;
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s between retries
       }
     }
 
-    // Call CHIP API to get payment status
-    const response = await fetch(`https://gate.chip-in.asia/api/v1/purchases/${purchaseId}`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${CHIP_SECRET_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    })
-
-    const data = await response.json()
-
-    if (!response.ok) {
+    if (!booking) {
       throw createError({
-        statusCode: response.status,
-        statusMessage: data.message || 'Failed to check payment status',
-      })
+        statusCode: 404,
+        message: "Booking not found",
+      });
     }
 
-    // Map CHIP status to our status
-    const status = data.status === 'paid' ? 'completed' 
-      : data.status === 'failed' ? 'failed'
-      : data.status === 'cancelled' ? 'cancelled'
-      : 'pending'
-
-    // Update cache
-    statusCache.set(purchaseId as string, {
-      status,
-      timestamp: Date.now()
-    })
+    // Cache the status for 1 minute
+    await redis.set(cacheKey, booking.status, "EX", CACHE_DURATION);
 
     return {
-      status,
-      chipStatus: data.status,
+      status: STATUS_MAP[booking.status as keyof typeof STATUS_MAP] || booking.status,
+      message: "Payment status retrieved from database",
       cached: false
-    }
+    };
   } catch (error: any) {
+    console.error("Error checking payment status:", error);
+    
+    // Handle specific error cases
+    if (error.statusCode === 404) {
+      throw createError({
+        statusCode: 404,
+        message: "Booking not found",
+      });
+    }
+
+    // For database errors, return a temporary error status
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      return {
+        status: "error",
+        message: "Temporary database error, please try again",
+        retryable: true
+      };
+    }
+
     throw createError({
       statusCode: error.statusCode || 500,
-      statusMessage: error.message || 'Internal server error',
-    })
+      message: error.message || "Failed to check payment status",
+    });
   }
-}) 
+}); 

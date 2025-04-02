@@ -796,13 +796,15 @@ async function recheckBookingStatus() {
 }
 
 // Add these new refs and constants
-const INITIAL_POLLING_INTERVAL = 10000; // Start with 10 seconds
-const MAX_POLLING_INTERVAL = 30000; // Max 30 seconds
-const MAX_POLLING_ATTEMPTS = 36; // 12 minutes total with exponential backoff
-const BACKOFF_FACTOR = 1.5; // Increase interval by 50% each time
+const INITIAL_POLLING_INTERVAL = 3000; // Start with 3 seconds for faster initial response
+const MAX_POLLING_INTERVAL = 10000; // Max 10 seconds
+const MAX_POLLING_ATTEMPTS = 120; // 10 minutes total
+const BACKOFF_FACTOR = 1.2; // Gentler backoff (20% increase)
 const purchaseId = ref<string | null>(null);
 const pollingCount = ref(0);
 const pollingTimer = ref<NodeJS.Timeout | null>(null);
+const lastStatusCheck = ref<number>(0);
+const STATUS_CHECK_COOLDOWN = 2000; // 2 seconds cooldown between status checks
 
 // Format functions
 function formatPrice(amount: number | undefined | null): string {
@@ -872,6 +874,13 @@ async function checkPaymentStatus() {
     return;
   }
 
+  // Implement cooldown to prevent too frequent checks
+  const now = Date.now();
+  if (now - lastStatusCheck.value < STATUS_CHECK_COOLDOWN) {
+    return;
+  }
+  lastStatusCheck.value = now;
+
   try {
     const response = await fetch(
       `/api/booking/check-payment-status?purchase_id=${purchaseId.value}`
@@ -881,41 +890,69 @@ async function checkPaymentStatus() {
     const data = await response.json();
     pollingCount.value++;
 
-    if (data.status === "completed") {
-      // Payment successful
-      stopPolling();
-      await fetchReceiptData(); // Refresh receipt data
-      window.location.href = `/book-a-session/receipt?booking=${route.query.booking}&status=success`;
-    } else if (data.status === "failed" || data.status === "cancelled") {
-      // Payment failed or cancelled
-      stopPolling();
-      error.value = `Payment ${data.status}. Please try again.`;
-    } else {
-      // Payment still pending, update polling interval with exponential backoff
-      const currentInterval = Math.min(
-        INITIAL_POLLING_INTERVAL * Math.pow(BACKOFF_FACTOR, pollingCount.value - 1),
-        MAX_POLLING_INTERVAL
-      );
-      if (pollingTimer.value) {
-        clearInterval(pollingTimer.value);
-        pollingTimer.value = setInterval(checkPaymentStatus, currentInterval);
-      }
+    // Handle different status responses
+    switch (data.status) {
+      case "completed":
+        // Payment successful
+        stopPolling();
+        await fetchReceiptData(); // Refresh receipt data
+        window.location.href = `/book-a-session/receipt?booking=${route.query.booking}&status=success`;
+        break;
+
+      case "partial":
+        // Partial payment received
+        console.log("Partial payment received, continuing to poll");
+        break;
+
+      case "failed":
+        // Payment failed
+        stopPolling();
+        error.value = "Payment failed. Please try again.";
+        break;
+
+      case "error":
+        // Temporary error, retry if allowed
+        if (data.retryable) {
+          console.log("Temporary error, will retry");
+          break;
+        }
+        stopPolling();
+        error.value = data.message || "An error occurred while checking payment status.";
+        break;
+
+      case "pending":
+      default:
+        // Payment still pending, update polling interval with smart backoff
+        const currentInterval = Math.min(
+          INITIAL_POLLING_INTERVAL * Math.pow(BACKOFF_FACTOR, Math.floor(pollingCount.value / 10)),
+          MAX_POLLING_INTERVAL
+        );
+        
+        if (pollingTimer.value) {
+          clearInterval(pollingTimer.value);
+          pollingTimer.value = setInterval(checkPaymentStatus, currentInterval);
+        }
     }
   } catch (err: any) {
     console.error("Error checking payment status:", err);
-    stopPolling();
+    // Don't stop polling on error, just continue with current interval
+    // This helps handle temporary network issues
   }
 }
 
-// Start polling
-function startPolling(chipPurchaseId: string) {
+// Start polling with optimized initial interval and delay
+async function startPolling(chipPurchaseId: string) {
   purchaseId.value = chipPurchaseId;
   pollingCount.value = 0;
+  lastStatusCheck.value = 0;
 
   // Clear any existing polling
   stopPolling();
 
-  // Start new polling
+  // Add initial delay to allow webhook processing
+  await new Promise(resolve => setTimeout(resolve, 5000));
+
+  // Start new polling with initial interval
   pollingTimer.value = setInterval(checkPaymentStatus, INITIAL_POLLING_INTERVAL);
 }
 
