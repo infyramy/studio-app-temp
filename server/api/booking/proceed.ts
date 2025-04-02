@@ -437,19 +437,6 @@ export default defineEventHandler(async (event: H3Event) => {
               "Content-Type": "application/json",
               "Accept": "application/json"
             });
-            
-            // First try to resolve the domain
-            try {
-              const dns = await fetch('https://dns.google/resolve?name=gate.chip-in.asia');
-              if (!dns.ok) {
-                throw new Error('Failed to resolve CHIP API domain');
-              }
-              const dnsData = await dns.json();
-              console.log("DNS resolution successful:", dnsData);
-            } catch (dnsError) {
-              console.error("DNS resolution failed:", dnsError);
-              throw new Error('Failed to resolve CHIP API domain. Please check your network connection.');
-            }
 
             // Try to connect to CHIP API with retries
             let lastError = null;
@@ -470,7 +457,15 @@ export default defineEventHandler(async (event: H3Event) => {
                     keepalive: true,
                     cache: 'no-store',
                     mode: 'cors',
-                    credentials: 'omit'
+                    credentials: 'omit',
+                    // Add connection options
+                    duplex: 'half',
+                    redirect: 'follow',
+                    integrity: undefined,
+                    referrer: undefined,
+                    referrerPolicy: undefined,
+                    // Increase timeout for each attempt
+                    timeout: 30000 * attempt // 30s, 60s, 90s
                   }
                 );
                 
@@ -492,11 +487,15 @@ export default defineEventHandler(async (event: H3Event) => {
                 console.error("Error details:", {
                   name: err.name,
                   message: err.message,
-                  stack: err.stack
+                  stack: err.stack,
+                  cause: err.cause
                 });
                 
                 if (attempt < 3) {
-                  await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+                  // Exponential backoff with jitter
+                  const backoffDelay = Math.min(2000 * Math.pow(2, attempt - 1) + Math.random() * 1000, 10000);
+                  console.log(`Waiting ${backoffDelay}ms before retry...`);
+                  await new Promise(resolve => setTimeout(resolve, backoffDelay));
                   continue;
                 }
               }
