@@ -397,7 +397,8 @@ export default defineEventHandler(async (event: H3Event) => {
             ],
             currency: "MYR",
             total: Math.round(body.payment_amount * 100),
-            timezone: "Asia/Kuala_Lumpur"
+            timezone: "Asia/Kuala_Lumpur",
+            language: "en"
           },
           client: {
             full_name: body.name,
@@ -426,7 +427,7 @@ export default defineEventHandler(async (event: H3Event) => {
         // Update the makeRequest function with better error handling
         const makeRequest = async () => {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 60000);
+          const timeoutId = setTimeout(() => controller.abort(), 120000); // Increased to 120 seconds
 
           try {
             console.log("Making CHIP API request...");
@@ -444,6 +445,11 @@ export default defineEventHandler(async (event: H3Event) => {
             for (let attempt = 1; attempt <= 3; attempt++) {
               try {
                 console.log(`Attempt ${attempt} to connect to CHIP API...`);
+                
+                // Create a new controller for each attempt
+                const attemptController = new AbortController();
+                const attemptTimeoutId = setTimeout(() => attemptController.abort(), 60000); // 60 seconds per attempt
+
                 const response = await fetch(
                   "https://gate.chip-in.asia/api/v1/purchases",
                   {
@@ -454,11 +460,13 @@ export default defineEventHandler(async (event: H3Event) => {
                       "Accept": "application/json"
                     },
                     body: JSON.stringify(chipRequestBody),
-                    signal: controller.signal
+                    signal: attemptController.signal,
+                    // Add keepalive to maintain connection
+                    keepalive: true
                   }
                 );
                 
-                clearTimeout(timeoutId);
+                clearTimeout(attemptTimeoutId);
                 
                 if (!response.ok) {
                   const errorData = await response.json().catch(() => ({}));
@@ -482,7 +490,7 @@ export default defineEventHandler(async (event: H3Event) => {
                 
                 if (attempt < 3) {
                   // Exponential backoff with jitter
-                  const backoffDelay = Math.min(2000 * Math.pow(2, attempt - 1) + Math.random() * 1000, 10000);
+                  const backoffDelay = Math.min(5000 * Math.pow(2, attempt - 1) + Math.random() * 2000, 30000);
                   console.log(`Waiting ${backoffDelay}ms before retry...`);
                   await new Promise(resolve => setTimeout(resolve, backoffDelay));
                   continue;
