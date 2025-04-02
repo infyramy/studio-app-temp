@@ -114,9 +114,8 @@ async function retry<T>(
     try {
       // Increase timeout with each retry
       const timeout = Math.min(10000 * attempt, 30000); // 10s, 20s, 30s
-      const timeoutId = setTimeout(() => {
-        throw new Error(`Request timed out after ${timeout}ms`);
-      }, timeout);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
 
       try {
         const result = await fn();
@@ -345,6 +344,15 @@ export default defineEventHandler(async (event: H3Event) => {
           .map((method: string) => method.trim().replace(/\s+/g, ""))
           .filter(Boolean); // Remove empty entries
 
+        console.log("Payment Methods:", methods);
+
+        if (!methods.length) {
+          throw createError({
+            statusCode: 400,
+            statusMessage: "No active payment methods configured",
+          });
+        }
+
         // Create the request body
         const chipRequestBody = {
           brand_id: CHIP_BRAND_ID.value,
@@ -380,11 +388,11 @@ export default defineEventHandler(async (event: H3Event) => {
 
         // Update the makeRequest function with better error handling
         const makeRequest = async () => {
-          const timeoutId = setTimeout(() => {
-            throw new Error('Request timed out');
-          }, 10000); // 10 second timeout
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 30000);
 
           try {
+            console.log("Making CHIP API request...");
             const response = await fetch(
               "https://gate.chip-in.asia/api/v1/purchases",
               {
@@ -395,7 +403,7 @@ export default defineEventHandler(async (event: H3Event) => {
                   "Accept": "application/json"
                 },
                 body: JSON.stringify(chipRequestBody),
-                signal: AbortSignal.timeout(10000),
+                signal: controller.signal,
                 credentials: "omit"
               }
             );
@@ -411,17 +419,18 @@ export default defineEventHandler(async (event: H3Event) => {
             return response;
           } catch (err: any) {
             clearTimeout(timeoutId);
-            if (err.name === 'AbortError' || err.message.includes('timed out')) {
+            if (err.name === 'AbortError') {
               throw new Error('Request timed out. Please try again.');
             }
             throw err;
           }
         };
         
-        // Attempt the fetch with improved retries
-        const chipResponse = await retry(makeRequest, 3, 2000);
+        // Attempt the fetch with improved retries and longer delays
+        console.log("Starting CHIP payment process...");
+        const chipResponse = await retry(makeRequest, 3, 5000);
         
-        console.log("CHIP Response:", chipResponse);
+        console.log("CHIP Response received:", chipResponse);
         console.log("CHIP Response Status:", chipResponse.status);
         console.log("CHIP Response Status Text:", chipResponse.statusText);
 

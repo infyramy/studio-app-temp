@@ -3836,6 +3836,209 @@ Let me modify the code:
 
 _****_
 
+```diff
+            skip_capture: false,
+            payment_method_whitelist: methods,
++           due: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minutes from now
+          };
+  
+  
+          const chipData = await chipResponse.json();
+-         // console.log("CHIP Data:", chipData);
++         console.log("CHIP Data:", chipData);
+  
+          if (chipResponse.status !== 201) {
+  
+          // Update booking with CHIP purchase ID
+-             // await knex("booking")
+-             //   .where("id", bookingId)
+-             //   .update({ chip_purchase_id: chipData.id });
++         await knex("booking")
++           .where("id", bookingId)
++           .update({ 
++             chip_purchase_id: chipData.id,
++             payment_initiated_at: new Date().toISOString()
++           });
+  
+          return {
+```
+
+---
+
+_****_
+
+I've made several important changes to fix the CHIP payment processing:
+
+1. Added `due` field to the request body (30 minutes from now) as required by the API
+2. Uncommented and updated the booking update with `chip_purchase_id` and `payment_initiated_at`
+3. Enabled logging of the CHIP response data for better debugging
+4. Kept the proper request structure with all required fields
+
+The key changes that should fix the payment processing:
+1. Added payment expiration time with `due` field
+2. Properly storing the CHIP purchase ID in the database
+3. Added payment initiation timestamp
+4. Maintaining proper error handling and logging
+
+The remaining linter errors are unrelated to the CHIP API integration and are about missing utility functions for formatting. Would you like me to address those as well?
+
+Please try the payment process again with these changes. The request should now match the CHIP API documentation exactly and properly handle the payment flow.
+
+---
+
+_**User**_
+
+still get this error CHIP Request Body: {"brand_id":"dead8838-9c92-4bd4-b5ad-83b9c9ac1e6e","reference":"BOOKING-514","platform":"web","purchase":{"products":[{"name":"Booking Session","price":12000}],"currency":"MYR"},"client":{"full_name":"test","email":"stitchnstudio25@yahoo.com","phone":"601114401720"},"success_callback":"https://teststudio.0o0.my/api/booking/payment-callback","success_redirect":"https://teststudio.0o0.my/book-a-session/receipt?booking=RCP1743624679171500&status=success","failure_redirect":"https://teststudio.0o0.my/book-a-session/failed-payment?booking=RCP1743624679171500&status=failed","cancel_redirect":"https://teststudio.0o0.my/book-a-session/failed-payment?booking=RCP1743624679171500&status=cancelled","send_receipt":true,"skip_capture":false,"payment_method_whitelist":[],"due":"2025-04-02T20:41:19.174Z"}
+[nitro] [uncaughtException] Error: Request timed out after 10000ms
+at Timeout._onTimeout (file:///app/server/chunks/routes/api/booking/proceed.mjs:26:15)
+at listOnTimeout (node:internal/timers:569:17)
+at process.processTimers (node:internal/timers:512:7)
+[nitro] [uncaughtException] Error: Request timed out
+at Timeout._onTimeout (file:///app/server/chunks/routes/api/booking/proceed.mjs:209:19)
+at listOnTimeout (node:internal/timers:569:17)
+at process.processTimers (node:internal/timers:512:7)
+Attempt 1 failed: DOMException [TimeoutError]: The operation was aborted due to timeout
+at node:internal/deps/undici/undici:12637:11
+at async makeRequest (file:///app/server/chunks/routes/api/booking/proceed.mjs:212:30)
+at async retry (file:///app/server/chunks/routes/api/booking/proceed.mjs:29:24)
+at async Object.handler (file:///app/server/chunks/routes/api/booking/proceed.mjs:241:30)
+at async Object.handler (file:///app/server/chunks/nitro/nitro.mjs:3161:19)
+at async Server.toNodeHandle (file:///app/server/chunks/nitro/nitro.mjs:3432:7)
+[nitro] [uncaughtException] Error: Request timed out
+at Timeout._onTimeout (file:///app/server/chunks/routes/api/booking/proceed.mjs:209:19)
+at listOnTimeout (node:internal/timers:569:17)
+at process.processTimers (node:internal/timers:512:7)
+Attempt 2 failed: DOMException [TimeoutError]: The operation was aborted due to timeout
+at node:internal/deps/undici/undici:12637:11
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+at async makeRequest (file:///app/server/chunks/routes/api/booking/proceed.mjs:212:30)
+at async retry (file:///app/server/chunks/routes/api/booking/proceed.mjs:29:24)
+at async Object.handler (file:///app/server/chunks/routes/api/booking/proceed.mjs:241:30)
+at async Object.handler (file:///app/server/chunks/nitro/nitro.mjs:3161:19)
+at async Server.toNodeHandle (file:///app/server/chunks/nitro/nitro.mjs:3432:7)
+
+---
+
+_**Assistant**_
+
+I notice a few issues from the error logs:
+
+1. The `payment_method_whitelist` is empty (`[]`)
+2. The request is timing out after 10 seconds
+3. The API endpoint might be having connectivity issues
+
+Let me fix these issues:
+
+
+
+---
+
+_****_
+
+```diff
+            .filter(Boolean); // Remove empty entries
+  
++         console.log("Payment Methods:", methods);
++ 
++         if (!methods.length) {
++           throw createError({
++             statusCode: 400,
++             statusMessage: "No active payment methods configured",
++           });
++         }
++ 
+          // Create the request body
+          const chipRequestBody = {
+            const timeoutId = setTimeout(() => {
+              throw new Error('Request timed out');
+-           }, 10000); // 10 second timeout
++           }, 30000); // Increased timeout to 30 seconds
+  
+            try {
+                  },
+                  body: JSON.stringify(chipRequestBody),
+-                 signal: AbortSignal.timeout(10000),
++                 signal: AbortSignal.timeout(30000), // Increased timeout to 30 seconds
+                  credentials: "omit"
+                }
+          };
+          
+-         // Attempt the fetch with improved retries
+-         const chipResponse = await retry(makeRequest, 3, 2000);
++         // Attempt the fetch with improved retries and longer delays
++         const chipResponse = await retry(makeRequest, 3, 5000); // Increased delay between retries to 5 seconds
+          
+          console.log("CHIP Response:", chipResponse);
+```
+
+---
+
+_****_
+
+I've made several important changes to fix the issues:
+
+1. Added validation for payment methods:
+   ```typescript
+   if (!methods.length) {
+     throw createError({
+       statusCode: 400,
+       statusMessage: "No active payment methods configured",
+     });
+   }
+   ```
+
+2. Increased timeouts:
+   - Changed timeout from 10 seconds to 30 seconds
+   - Updated both the timeoutId and AbortSignal timeouts
+   - Increased delay between retries from 2 seconds to 5 seconds
+
+3. Added better logging:
+   ```typescript
+   console.log("Payment Methods:", methods);
+   ```
+
+The main issues were:
+1. Empty payment methods array - now we validate this before making the request
+2. Too short timeout - increased to 30 seconds to handle slower responses
+3. Too short retry delays - increased to 5 seconds between retries
+
+The remaining linter errors are unrelated to the CHIP API integration (they're about formatting functions for WhatsApp messages).
+
+Try the payment process again. You should now see:
+1. A clear error if no payment methods are configured
+2. Longer timeouts to handle slower responses
+3. Better logging of the payment methods being used
+
+If you still get timeouts, we might need to:
+1. Check if the CHIP API endpoint is accessible from your server
+2. Verify the network connectivity
+3. Consider using a different HTTP client library
+
+Would you like me to make any additional adjustments?
+
+---
+
+_**User**_
+
+chip api endpoint is okay, but i dont see why app cannot conintue
+
+---
+
+_**Assistant**_
+
+Looking at the error logs and the code, I notice a few issues that might be preventing the app from continuing:
+
+1. The request is timing out after 10 seconds, but we've increased the timeout to 30 seconds in the code. This suggests the changes might not be deployed yet.
+
+2. The error handling in the retry function might be too aggressive. Let's modify it to be more resilient.
+
+Let me update the retry logic:
+
+
+---
+
+_****_
+
 Cancelled
 
 ---
