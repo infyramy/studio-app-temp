@@ -429,8 +429,7 @@ export default defineEventHandler(async (event: H3Event) => {
         if (chipResponse.status !== 201) {
           // If CHIP payment initialization fails, update booking status to failed
           await knex("booking").where("id", bookingId).update({ 
-            status: 4, // 4 = Failed
-            payment_error: chipData.message || 'Payment initialization failed'
+            status: 4 // 4 = Failed
           });
 
           throw createError({
@@ -459,8 +458,7 @@ export default defineEventHandler(async (event: H3Event) => {
             
             // Update booking status to failed
             await knex("booking").where("id", bookingId).update({ 
-              status: 4, // 4 = Failed
-              payment_error: error.message || 'Payment processing failed'
+              status: 4 // 4 = Failed
             });
 
             throw createError({
