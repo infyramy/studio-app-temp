@@ -364,6 +364,7 @@ export default defineEventHandler(async (event: H3Event) => {
           client: {
             full_name: body.name,
             email: body.email,
+            phone: body.phone,
           },
           success_callback: `${process.env.PUBLIC_API_URL}/booking/payment-callback`,
           success_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=success`,
@@ -371,10 +372,8 @@ export default defineEventHandler(async (event: H3Event) => {
           cancel_redirect: `${process.env.PUBLIC_URL}/book-a-session/failed-payment?booking=${receiptNumber}&status=cancelled`,
           send_receipt: true,
           skip_capture: false,
+          payment_method_whitelist: methods,
         };
-
-        // Create request body string with explicit double quotes for payment methods
-        // const requestBody = `${JSON.stringify(chipRequestBody).slice(0, -1)},"payment_method_whitelist":["${methods.join('","')}"]}`
 
         console.log("CHIP Request Body:", JSON.stringify(chipRequestBody));
 
@@ -390,11 +389,12 @@ export default defineEventHandler(async (event: H3Event) => {
               {
                 method: "POST",
                 headers: {
-                  Authorization: `Bearer ${CHIP_SECRET_KEY.value}`,
+                  "Authorization": `Bearer ${CHIP_SECRET_KEY.value}`,
                   "Content-Type": "application/json",
+                  "Accept": "application/json"
                 },
                 body: JSON.stringify(chipRequestBody),
-                signal: AbortSignal.timeout(10000), // Add abort signal
+                signal: AbortSignal.timeout(10000),
                 credentials: "omit"
               }
             );
@@ -403,11 +403,12 @@ export default defineEventHandler(async (event: H3Event) => {
             
             if (!response.ok) {
               const errorData = await response.json().catch(() => ({}));
+              console.error("CHIP API Error Response:", errorData);
               throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
             }
             
             return response;
-          } catch (err) {
+          } catch (err: any) {
             clearTimeout(timeoutId);
             if (err.name === 'AbortError' || err.message.includes('timed out')) {
               throw new Error('Request timed out. Please try again.');
