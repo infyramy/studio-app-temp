@@ -1,6 +1,5 @@
 import { defineEventHandler, createError } from "h3";
 import knex from "~/server/utils/knex";
-import { redis } from "~/server/utils/redis";
 import { sendWhatsAppNotification } from "~/server/utils/whatsapp";
 import crypto from 'crypto';
 
@@ -31,55 +30,49 @@ function verifyWebhookSignature(payload: string, signature: string): boolean {
   }
 }
 
+interface WebhookBody {
+  id: string;
+  purchase_id: string;
+  status: string;
+}
+
 export default defineEventHandler(async (event) => {
   try {
-    const body = await readBody(event);
+    const body = await readBody<WebhookBody>(event);
     const signature = getHeader(event, WEBHOOK_SIGNATURE_HEADER);
-    const rawBody = await readRawBody(event);
 
     // Verify webhook signature
-    if (!signature || !CHIP_SECRET_KEY || !rawBody) {
+    if (!signature || !CHIP_SECRET_KEY) {
       throw createError({
         statusCode: 400,
-        message: "Missing required webhook data",
+        message: "Invalid webhook signature"
       });
     }
 
-    if (!verifyWebhookSignature(rawBody.toString(), signature)) {
-      throw createError({
-        statusCode: 401,
-        message: "Invalid webhook signature",
-      });
-    }
-
-    const purchaseId = body.purchase_id;
-    if (!purchaseId) {
+    // Verify signature using raw body
+    const rawBody = JSON.stringify(body);
+    if (!verifyWebhookSignature(rawBody, signature)) {
       throw createError({
         statusCode: 400,
-        message: "Purchase ID is required",
+        message: "Webhook signature verification failed"
       });
     }
 
-    // Check if webhook was already processed
-    const processedWebhook = await redis.get(`webhook:${purchaseId}`);
-    if (processedWebhook) {
-      return { success: true, message: "Webhook already processed" };
-    }
-
-    // Get booking details with minimal fields
+    // Get booking details with status check
     const [booking] = await knex("booking")
-      .select("id", "phone", "receipt_number", "customer_name", "date", "time", "location", "payment_amount")
-      .where("payment_ref_number", purchaseId)
+      .select("id", "status", "user_phoneno", "payment_ref_number", "user_fullname", "session_date", "session_time", "payment_amount")
+      .where("payment_ref_number", body.purchase_id)
+      .whereNot("status", STATUS_MAP[body.status as keyof typeof STATUS_MAP] || 4)
       .limit(1);
 
     if (!booking) {
-      throw createError({
-        statusCode: 404,
-        message: "Booking not found",
-      });
+      return { 
+        success: true,
+        message: "Booking already processed or not found"
+      };
     }
 
-    // Update booking status with minimal fields
+    // Update booking status
     const newStatus = STATUS_MAP[body.status as keyof typeof STATUS_MAP] || 4;
     await knex("booking")
       .where("id", booking.id)
@@ -87,54 +80,39 @@ export default defineEventHandler(async (event) => {
         status: newStatus,
         payment_status: body.status,
         payment_date: new Date(),
+        updated_at: new Date(),
       });
 
-    // Update status cache immediately
-    await redis.set(`payment_status:${purchaseId}`, body.status, "EX", 600); // 10 minutes
+    // Log status transition
+    await knex("booking_status_log").insert({
+      booking_id: booking.id,
+      old_status: booking.status,
+      new_status: newStatus,
+      payment_status: body.status,
+      created_at: new Date(),
+    });
 
-    // Mark webhook as processed
-    await redis.set(`webhook:${purchaseId}`, "processed", "EX", 86400); // 24 hours
-
-    // Handle notifications asynchronously
+    // Send notifications based on status
     if (body.status === "paid") {
-      // Get config values from cache
-      const [companyName, companyPhone, companyEmail] = await Promise.all([
-        redis.get("config:company_name"),
-        redis.get("config:company_phone"),
-        redis.get("config:company_email")
-      ]);
-
-      // Send notifications without waiting
-      Promise.all([
-        sendWhatsAppNotification(
-          booking.phone,
-          booking.receipt_number,
-          "customer",
-          {
-            companyName: companyName || "Studio Raya 2025",
-            companyPhone: companyPhone || "",
-            companyEmail: companyEmail || "",
-            bookingId: booking.id,
-            customerName: booking.customer_name,
-            date: booking.date,
-            time: booking.time,
-            location: booking.location,
-            amount: booking.payment_amount,
-          }
-        ),
-        sendWhatsAppNotification(
-          companyPhone || "",
-          booking.receipt_number,
-          "admin"
-        )
-      ]).catch(error => {
-        console.error("Notification error:", error);
-      });
+      await sendWhatsAppNotification(
+        booking.user_phoneno,
+        booking.payment_ref_number,
+        "customer",
+        booking.user_fullname,
+        booking.session_date,
+        booking.session_time
+      );
     }
 
-    return { success: true };
-  } catch (error) {
-    console.error("Payment callback error:", error);
-    throw error;
+    return { 
+      success: true,
+      message: `Payment ${body.status} processed successfully`
+    };
+  } catch (error: any) {
+    console.error("Error in payment callback:", error);
+    throw createError({
+      statusCode: error.statusCode || 500,
+      message: error.message || "Internal server error"
+    });
   }
 });

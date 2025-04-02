@@ -362,7 +362,7 @@ export default defineEventHandler(async (event: H3Event) => {
           // Use retry mechanism with the fetch request
           const makeRequest = async () => {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 seconds timeout
+            const timeoutId = setTimeout(() => controller.abort(), 60000); // Increase timeout to 60 seconds
             
             try {
               const response = await fetch(
@@ -372,13 +372,43 @@ export default defineEventHandler(async (event: H3Event) => {
                   headers: {
                     Authorization: `Bearer ${CHIP_SECRET_KEY.value}`,
                     "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": "BookingRaya/1.0"
                   },
-                  body: JSON.stringify(chipRequestBody),
-                  signal: controller.signal
+                  body: JSON.stringify({
+                    brand_id: CHIP_BRAND_ID.value,
+                    reference: `BOOKING-${bookingId}`,
+                    platform: "web",
+                    purchase: {
+                      amount: Math.round(body.payment_amount * 100),
+                      currency: "MYR",
+                      due: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minutes from now
+                    },
+                    client: {
+                      full_name: body.name,
+                      email: body.email,
+                      phone: body.phone,
+                    },
+                    success_callback: `${process.env.PUBLIC_API_URL}/api/booking/payment-callback`,
+                    success_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking_id=${bookingId}`,
+                    failure_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking_id=${bookingId}&status=failed`,
+                    cancel_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking_id=${bookingId}&status=cancelled`,
+                  }),
+                  signal: controller.signal,
+                  keepalive: true,
+                  cache: "no-store",
+                  mode: "cors",
+                  credentials: "omit"
                 }
               );
               
               clearTimeout(timeoutId);
+              
+              if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+              }
+              
               return response;
             } catch (err) {
               clearTimeout(timeoutId);
@@ -386,7 +416,7 @@ export default defineEventHandler(async (event: H3Event) => {
             }
           };
           
-          // Attempt the fetch with retries
+          // Attempt the fetch with improved retries
           const chipResponse = await retry(makeRequest, 3, 2000);
           
           console.log("CHIP Response:", chipResponse);

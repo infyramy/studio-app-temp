@@ -765,127 +765,76 @@ const statusDisplay = computed(() => {
   return STATUS_MAP[receiptData.value.status as keyof typeof STATUS_MAP];
 });
 
-// Add recheck status function
-async function recheckBookingStatus() {
-  if (!receiptData.value) return;
+// Update polling constants for better load handling
+const INITIAL_POLLING_INTERVAL = 1000; // 1s initial interval
+const MAX_POLLING_INTERVAL = 3000; // 3s max interval
+const MAX_POLLING_COUNT = 120; // 2 minutes total with optimized polling
+const STATUS_CHECK_COOLDOWN = 500; // 500ms cooldown between status checks
+const BATCH_SIZE = 5; // Number of concurrent status checks
 
-  try {
-    isRecheckingStatus.value = true;
-    error.value = null;
+// Add payment state tracking
+const paymentState = ref({
+  isProcessing: false,
+  lastError: null as string | null,
+  retryCount: 0,
+  maxRetries: 3,
+  sessionExpired: false,
+  lastStatusCheck: 0,
+});
 
-    const response = await fetch(
-      `/api/booking/receipt-detail?receiptNumber=${route.query.booking}`
-    );
-
-    if (!response.ok) throw new Error("Failed to recheck booking status");
-
-    const { data, status, message } = await response.json();
-
-    if (status !== "success" || !data) {
-      throw new Error(message || "Failed to recheck booking status");
+// Add rate limiting with improved window
+const rateLimiter = {
+  lastCheck: 0,
+  checkCount: 0,
+  windowStart: Date.now(),
+  windowSize: 60000, // 1 minute window
+  maxChecks: 30, // Max 30 checks per minute per user
+  
+  canCheck(): boolean {
+    const now = Date.now();
+    
+    // Reset window if needed
+    if (now - this.windowStart > this.windowSize) {
+      this.windowStart = now;
+      this.checkCount = 0;
     }
-
-    // Update receipt data with new status
-    receiptData.value = data;
-  } catch (err: any) {
-    console.error("Error rechecking status:", err);
-    error.value = err.message;
-  } finally {
-    isRecheckingStatus.value = false;
-  }
-}
-
-// Add these new refs and constants
-const INITIAL_POLLING_INTERVAL = 3000; // Start with 3 seconds for faster initial response
-const MAX_POLLING_INTERVAL = 10000; // Max 10 seconds
-const MAX_POLLING_ATTEMPTS = 120; // 10 minutes total
-const BACKOFF_FACTOR = 1.2; // Gentler backoff (20% increase)
-const purchaseId = ref<string | null>(null);
-const pollingCount = ref(0);
-const pollingTimer = ref<NodeJS.Timeout | null>(null);
-const lastStatusCheck = ref<number>(0);
-const STATUS_CHECK_COOLDOWN = 2000; // 2 seconds cooldown between status checks
-
-// Format functions
-function formatPrice(amount: number | undefined | null): string {
-  if (amount === undefined || amount === null) return "0.00";
-  return amount.toFixed(2);
-}
-
-function formatDate(dateString: string): string {
-  if (!dateString) return "N/A";
-  return new Date(dateString).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-}
-
-function formatDatetime(dateString: string): string {
-  if (!dateString) return "N/A";
-  return new Date(dateString).toLocaleString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-  });
-}
-
-function formatTime(timeString: string): string {
-  if (!timeString) return "N/A";
-  return new Date(`1970-01-01T${timeString}`).toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "numeric",
-    hour12: true,
-  });
-}
-
-// Fetch receipt data
-async function fetchReceiptData() {
-  try {
-    isLoading.value = true;
-    error.value = null;
-    const response = await fetch(
-      `/api/booking/receipt-detail?receiptNumber=${route.query.booking}`
-    );
-    if (!response.ok) throw new Error("Failed to load receipt data");
-    const { data, status, message } = await response.json();
-
-    if (status !== "success" || !data) {
-      throw new Error(message || "Failed to load receipt data");
+    
+    // Check if we're within rate limits
+    if (this.checkCount >= this.maxChecks) {
+      return false;
     }
-
-    console.log("Receipt Data:", data); // Debug log
-    receiptData.value = data;
-  } catch (err: any) {
-    console.error("Error fetching receipt:", err);
-    error.value = err.message;
-    receiptData.value = null;
-  } finally {
-    isLoading.value = false;
+    
+    this.checkCount++;
+    return true;
   }
-}
+};
 
-// Add payment status polling function
+// Update checkPaymentStatus function with better error handling
 async function checkPaymentStatus() {
-  if (!purchaseId.value || pollingCount.value >= MAX_POLLING_ATTEMPTS) {
-    stopPolling();
-    return;
-  }
-
-  // Implement cooldown to prevent too frequent checks
   const now = Date.now();
-  if (now - lastStatusCheck.value < STATUS_CHECK_COOLDOWN) {
+  
+  // Rate limiting check
+  if (!rateLimiter.canCheck()) {
+    console.log("Rate limit reached, backing off");
+    stopPolling();
+    error.value = "Too many status checks. Please wait a moment and try again.";
     return;
   }
-  lastStatusCheck.value = now;
+  
+  // Cooldown check
+  if (now - paymentState.value.lastStatusCheck < STATUS_CHECK_COOLDOWN) {
+    return;
+  }
+  paymentState.value.lastStatusCheck = now;
 
   try {
     const response = await fetch(
       `/api/booking/check-payment-status?purchase_id=${purchaseId.value}`
     );
-    if (!response.ok) throw new Error("Failed to check payment status");
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.message || "Failed to check payment status");
+    }
 
     const data = await response.json();
     pollingCount.value++;
@@ -893,27 +842,29 @@ async function checkPaymentStatus() {
     // Handle different status responses
     switch (data.status) {
       case "completed":
-        // Payment successful
         stopPolling();
-        await fetchReceiptData(); // Refresh receipt data
+        await fetchReceiptData();
         window.location.href = `/book-a-session/receipt?booking=${route.query.booking}&status=success`;
         break;
 
       case "partial":
-        // Partial payment received
         console.log("Partial payment received, continuing to poll");
         break;
 
       case "failed":
-        // Payment failed
         stopPolling();
         error.value = "Payment failed. Please try again.";
         break;
 
       case "error":
-        // Temporary error, retry if allowed
         if (data.retryable) {
-          console.log("Temporary error, will retry");
+          if (paymentState.value.retryCount < paymentState.value.maxRetries) {
+            paymentState.value.retryCount++;
+            console.log(`Temporary error, retry attempt ${paymentState.value.retryCount}`);
+            break;
+          }
+          stopPolling();
+          error.value = "Maximum retry attempts reached. Please contact support.";
           break;
         }
         stopPolling();
@@ -922,10 +873,21 @@ async function checkPaymentStatus() {
 
       case "pending":
       default:
-        // Payment still pending, update polling interval with smart backoff
+        if (pollingCount.value >= MAX_POLLING_COUNT) {
+          stopPolling();
+          error.value = "Payment status check timed out. Please contact support.";
+          break;
+        }
+
+        // Exponential backoff with jitter
+        const baseInterval = INITIAL_POLLING_INTERVAL;
+        const maxInterval = MAX_POLLING_INTERVAL;
+        const backoffFactor = Math.min(1.5, 1 + (pollingCount.value / 60));
+        const jitter = Math.random() * 200; // Add up to 200ms of random jitter
+        
         const currentInterval = Math.min(
-          INITIAL_POLLING_INTERVAL * Math.pow(BACKOFF_FACTOR, Math.floor(pollingCount.value / 10)),
-          MAX_POLLING_INTERVAL
+          baseInterval * backoffFactor + jitter,
+          maxInterval
         );
         
         if (pollingTimer.value) {
@@ -935,41 +897,38 @@ async function checkPaymentStatus() {
     }
   } catch (err: any) {
     console.error("Error checking payment status:", err);
-    // Don't stop polling on error, just continue with current interval
-    // This helps handle temporary network issues
+    
+    // Handle network errors with exponential backoff
+    if (err.name === 'NetworkError' || err.message.includes('network')) {
+      if (paymentState.value.retryCount < paymentState.value.maxRetries) {
+        paymentState.value.retryCount++;
+        const currentInterval = Math.min(
+          INITIAL_POLLING_INTERVAL * Math.pow(1.5, paymentState.value.retryCount),
+          MAX_POLLING_INTERVAL
+        );
+        
+        if (pollingTimer.value) {
+          clearInterval(pollingTimer.value);
+          pollingTimer.value = setInterval(checkPaymentStatus, currentInterval);
+        }
+        return;
+      }
+    }
+    
+    stopPolling();
+    error.value = "Failed to check payment status. Please try again.";
   }
 }
 
-// Start polling with optimized initial interval and delay
-async function startPolling(chipPurchaseId: string) {
-  purchaseId.value = chipPurchaseId;
-  pollingCount.value = 0;
-  lastStatusCheck.value = 0;
-
-  // Clear any existing polling
-  stopPolling();
-
-  // Add initial delay to allow webhook processing
-  await new Promise(resolve => setTimeout(resolve, 5000));
-
-  // Start new polling with initial interval
-  pollingTimer.value = setInterval(checkPaymentStatus, INITIAL_POLLING_INTERVAL);
-}
-
-// Stop polling
-function stopPolling() {
-  if (pollingTimer.value) {
-    clearInterval(pollingTimer.value);
-    pollingTimer.value = null;
-  }
-}
-
-// Update initialize payment function
+// Update initialize payment function with better error handling
 async function initializePayment() {
   if (!receiptData.value) return;
 
   try {
-    isProcessingPayment.value = true;
+    paymentState.value.isProcessing = true;
+    error.value = null;
+    paymentState.value.retryCount = 0;
+
     const response = await fetch("/api/booking/create-payment", {
       method: "POST",
       headers: {
@@ -984,20 +943,31 @@ async function initializePayment() {
       }),
     });
 
-    if (!response.ok) throw new Error("Failed to initialize payment");
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.message || "Failed to initialize payment");
+    }
 
     const data = await response.json();
     paymentUrl.value = data.checkout_url;
 
     // Start polling for payment status
-    startPolling(data.id); // CHIP returns purchase ID in the response
+    startPolling(data.id);
 
     // Redirect to CHIP payment page
     window.location.href = data.checkout_url;
   } catch (err: any) {
-    error.value = err.message;
+    console.error("Payment initialization error:", err);
+    error.value = err.message || "Failed to initialize payment. Please try again.";
+    
+    // Handle specific error cases
+    if (err.message.includes("already paid")) {
+      error.value = "This booking has already been paid.";
+    } else if (err.message.includes("already initialized")) {
+      error.value = "Payment is already in progress for this booking.";
+    }
   } finally {
-    isProcessingPayment.value = false;
+    paymentState.value.isProcessing = false;
   }
 }
 
@@ -1163,6 +1133,14 @@ const downloadReceipt = async () => {
 // Clean up on component unmount
 onUnmounted(() => {
   stopPolling();
+  paymentState.value = {
+    isProcessing: false,
+    lastError: null,
+    retryCount: 0,
+    maxRetries: 3,
+    sessionExpired: false,
+    lastStatusCheck: 0,
+  };
 });
 
 // Update the payment actions section

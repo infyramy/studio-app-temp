@@ -1,14 +1,87 @@
 import { defineEventHandler, createError } from "h3";
 import knex from "~/server/utils/knex";
-import { redis } from "~/server/utils/redis";
 
-const CACHE_DURATION = 60; // 1 minute cache
 const STATUS_MAP = {
   1: "pending",
   2: "partial",
   3: "completed",
   4: "failed",
 } as const;
+
+// Optimized cache with size limits and cleanup
+class PaymentStatusCache {
+  private cache: Map<string, { 
+    status: string; 
+    timestamp: number;
+    lastCheck: number;
+    retryCount: number;
+  }>;
+  private readonly maxSize: number;
+  private readonly ttl: number;
+  private readonly cleanupInterval: number;
+  private readonly maxRetries: number;
+
+  constructor(maxSize: number = 1000, ttl: number = 1000) {
+    this.cache = new Map();
+    this.maxSize = maxSize;
+    this.ttl = ttl;
+    this.cleanupInterval = 5000; // Cleanup every 5 seconds
+    this.maxRetries = 3;
+    
+    // Start cleanup interval
+    setInterval(() => this.cleanup(), this.cleanupInterval);
+  }
+
+  get(key: string): { 
+    status: string; 
+    timestamp: number;
+    lastCheck: number;
+    retryCount: number;
+  } | undefined {
+    const entry = this.cache.get(key);
+    if (!entry) return undefined;
+    
+    if (Date.now() - entry.timestamp > this.ttl) {
+      this.cache.delete(key);
+      return undefined;
+    }
+    
+    return entry;
+  }
+
+  set(key: string, status: string): void {
+    // If cache is full, remove oldest entries
+    if (this.cache.size >= this.maxSize) {
+      this.cleanup();
+    }
+    
+    const existing = this.cache.get(key);
+    this.cache.set(key, {
+      status,
+      timestamp: Date.now(),
+      lastCheck: Date.now(),
+      retryCount: existing ? existing.retryCount + 1 : 0
+    });
+  }
+
+  private cleanup(): void {
+    const now = Date.now();
+    for (const [key, value] of this.cache.entries()) {
+      if (now - value.timestamp > this.ttl) {
+        this.cache.delete(key);
+      }
+    }
+  }
+
+  shouldRetry(key: string): boolean {
+    const entry = this.cache.get(key);
+    if (!entry) return true;
+    return entry.retryCount < this.maxRetries;
+  }
+}
+
+// Create cache instance with reasonable limits
+const statusCache = new PaymentStatusCache(1000, 1000); // 1000 entries, 1 second TTL
 
 export default defineEventHandler(async (event) => {
   try {
@@ -22,34 +95,32 @@ export default defineEventHandler(async (event) => {
       });
     }
 
-    // Try to get status from Redis cache first
-    const cacheKey = `payment_status:${purchaseId}`;
-    const cachedStatus = await redis.get(cacheKey);
-    
+    // Check cache first
+    const cachedStatus = statusCache.get(purchaseId);
     if (cachedStatus) {
       return {
-        status: STATUS_MAP[cachedStatus as keyof typeof STATUS_MAP] || cachedStatus,
+        status: cachedStatus.status,
         message: "Payment status retrieved from cache",
-        cached: true
+        cached: true,
+        retryCount: cachedStatus.retryCount
       };
     }
 
-    // If not in cache, check database with retry logic
-    let retries = 3;
-    let booking = null;
-
-    while (retries > 0 && !booking) {
-      try {
-        [booking] = await knex("booking")
-          .select("status")
-          .where("payment_ref_number", purchaseId)
-          .limit(1);
-      } catch (err) {
-        retries--;
-        if (retries === 0) throw err;
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s between retries
-      }
+    // Check if we should retry based on previous attempts
+    if (!statusCache.shouldRetry(purchaseId)) {
+      return {
+        status: "error",
+        message: "Maximum retry attempts reached. Please contact support.",
+        retryable: false
+      };
     }
+
+    // Get booking details
+    const [booking] = await knex("booking")
+      .select("status", "payment_ref_number", "payment_initiated_at")
+      .where("chip_purchase_id", purchaseId)
+      .whereIn("status", [1, 2, 3, 4])
+      .limit(1);
 
     if (!booking) {
       throw createError({
@@ -58,13 +129,36 @@ export default defineEventHandler(async (event) => {
       });
     }
 
-    // Cache the status for 1 minute
-    await redis.set(cacheKey, booking.status, "EX", CACHE_DURATION);
+    // Check if payment has expired (30 minutes)
+    if (booking.payment_initiated_at) {
+      const initiatedAt = new Date(booking.payment_initiated_at);
+      const now = new Date();
+      const diffMinutes = (now.getTime() - initiatedAt.getTime()) / (1000 * 60);
+      
+      if (diffMinutes > 30 && booking.status === 1) {
+        // Update booking status to failed
+        await knex("booking")
+          .where("chip_purchase_id", purchaseId)
+          .update({ status: 4 });
+        
+        return {
+          status: "failed",
+          message: "Payment session expired",
+          retryable: false
+        };
+      }
+    }
+
+    const status = STATUS_MAP[booking.status as keyof typeof STATUS_MAP] || booking.status;
+
+    // Update cache
+    statusCache.set(purchaseId, status);
 
     return {
-      status: STATUS_MAP[booking.status as keyof typeof STATUS_MAP] || booking.status,
-      message: "Payment status retrieved from database",
-      cached: false
+      status,
+      message: "Payment status retrieved successfully",
+      cached: false,
+      retryCount: 0
     };
   } catch (error: any) {
     console.error("Error checking payment status:", error);

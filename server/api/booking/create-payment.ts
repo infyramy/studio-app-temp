@@ -1,4 +1,5 @@
 import { H3Event } from 'h3'
+import knex from '~/server/utils/knex'
 
 const CHIP_SECRET_KEY = process.env.CHIP_SECRET_KEY
 const CHIP_BRAND_ID = process.env.CHIP_BRAND_ID
@@ -15,6 +16,51 @@ export default defineEventHandler(async (event: H3Event) => {
   try {
     const body = await readBody<PaymentRequest>(event)
     const { amount, bookingId, customerEmail, customerName, phone } = body
+
+    // Validate required fields
+    if (!amount || !bookingId || !customerEmail || !customerName || !phone) {
+      throw createError({
+        statusCode: 400,
+        message: 'Missing required fields',
+      })
+    }
+
+    // Validate amount is positive
+    if (amount <= 0) {
+      throw createError({
+        statusCode: 400,
+        message: 'Invalid payment amount',
+      })
+    }
+
+    // Check for existing payment
+    const existingPayment = await knex('booking')
+      .where('id', bookingId)
+      .select('status', 'chip_purchase_id')
+      .first()
+
+    if (!existingPayment) {
+      throw createError({
+        statusCode: 404,
+        message: 'Booking not found',
+      })
+    }
+
+    // Prevent duplicate payment attempts
+    if (existingPayment.chip_purchase_id) {
+      throw createError({
+        statusCode: 400,
+        message: 'Payment already initialized for this booking',
+      })
+    }
+
+    // Check if booking is already paid
+    if (existingPayment.status === 3) {
+      throw createError({
+        statusCode: 400,
+        message: 'Booking is already paid',
+      })
+    }
 
     // Create payment with CHIP API
     const response = await fetch('https://gate.chip-in.asia/api/v1/purchases', {
@@ -52,6 +98,14 @@ export default defineEventHandler(async (event: H3Event) => {
         statusMessage: data.message || 'Failed to create payment',
       })
     }
+
+    // Update booking with CHIP purchase ID
+    await knex('booking')
+      .where('id', bookingId)
+      .update({ 
+        chip_purchase_id: data.id,
+        payment_initiated_at: new Date().toISOString()
+      })
 
     return data
   } catch (error: any) {
