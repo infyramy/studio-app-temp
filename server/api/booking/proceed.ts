@@ -102,25 +102,45 @@ function generateReceiptNumber() {
   return `RCP${timestamp}${random}`;
 }
 
-// Add this function at the top with other utility functions
-/**
- * Retry a function with exponential backoff
- */
+// Update the retry function with better timeout handling
 async function retry<T>(
   fn: () => Promise<T>,
-  retries = 3,
-  delay = 1000,
-  backoff = 2
+  maxRetries: number = 3,
+  delay: number = 2000
 ): Promise<T> {
-  try {
-    return await fn();
-  } catch (error) {
-    if (retries <= 0) {
-      throw error;
+  let lastError: Error | null = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // Increase timeout with each retry
+      const timeout = Math.min(10000 * attempt, 30000); // 10s, 20s, 30s
+      const timeoutId = setTimeout(() => {
+        throw new Error(`Request timed out after ${timeout}ms`);
+      }, timeout);
+
+      try {
+        const result = await fn();
+        clearTimeout(timeoutId);
+        return result;
+      } catch (err) {
+        clearTimeout(timeoutId);
+        throw err;
+      }
+    } catch (error) {
+      lastError = error as Error;
+      console.error(`Attempt ${attempt} failed:`, error);
+      
+      if (attempt === maxRetries) {
+        break;
+      }
+      
+      // Exponential backoff with jitter
+      const backoffDelay = delay * Math.pow(2, attempt - 1) + Math.random() * 1000;
+      await new Promise(resolve => setTimeout(resolve, backoffDelay));
     }
-    await new Promise(resolve => setTimeout(resolve, delay));
-    return retry(fn, retries - 1, delay * backoff, backoff);
   }
+  
+  throw lastError;
 }
 
 export default defineEventHandler(async (event: H3Event) => {
@@ -358,85 +378,68 @@ export default defineEventHandler(async (event: H3Event) => {
 
         console.log("CHIP Request Body:", JSON.stringify(chipRequestBody));
 
-        try {
-          // Use retry mechanism with the fetch request
-          const makeRequest = async () => {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 60000); // Increase timeout to 60 seconds
-            
-            try {
-              const response = await fetch(
-                "https://gate.chip-in.asia/api/v1/purchases/",
-                {
-                  method: "POST",
-                  headers: {
-                    Authorization: `Bearer ${CHIP_SECRET_KEY.value}`,
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "User-Agent": "BookingRaya/1.0"
-                  },
-                  body: JSON.stringify({
-                    brand_id: CHIP_BRAND_ID.value,
-                    reference: `BOOKING-${bookingId}`,
-                    platform: "web",
-                    purchase: {
-                      amount: Math.round(body.payment_amount * 100),
-                      currency: "MYR",
-                      due: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minutes from now
-                    },
-                    client: {
-                      full_name: body.name,
-                      email: body.email,
-                      phone: body.phone,
-                    },
-                    success_callback: `${process.env.PUBLIC_API_URL}/api/booking/payment-callback`,
-                    success_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking_id=${bookingId}`,
-                    failure_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking_id=${bookingId}&status=failed`,
-                    cancel_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking_id=${bookingId}&status=cancelled`,
-                  }),
-                  signal: controller.signal,
-                  keepalive: true,
-                  cache: "no-store",
-                  mode: "cors",
-                  credentials: "omit"
-                }
-              );
-              
-              clearTimeout(timeoutId);
-              
-              if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+        // Update the makeRequest function with better error handling
+        const makeRequest = async () => {
+          const timeoutId = setTimeout(() => {
+            throw new Error('Request timed out');
+          }, 10000); // 10 second timeout
+
+          try {
+            const response = await fetch(
+              "https://gate.chip-in.asia/api/v1/purchases",
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${CHIP_SECRET_KEY.value}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(chipRequestBody),
+                signal: AbortSignal.timeout(10000), // Add abort signal
+                credentials: "omit"
               }
-              
-              return response;
-            } catch (err) {
-              clearTimeout(timeoutId);
-              throw err;
+            );
+            
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({}));
+              throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
             }
-          };
-          
-          // Attempt the fetch with improved retries
-          const chipResponse = await retry(makeRequest, 3, 2000);
-          
-          console.log("CHIP Response:", chipResponse);
-          console.log("CHIP Response Status:", chipResponse.status);
-          console.log("CHIP Response Status Text:", chipResponse.statusText);
-
-          const chipData = await chipResponse.json();
-          // console.log("CHIP Data:", chipData);
-
-          if (chipResponse.status !== 201) {
-            // If CHIP payment initialization fails, update booking status to failed
-            await knex("booking").where("id", bookingId).update({ status: 4 }); // 4 = Failed
-
-            throw createError({
-              statusCode: chipResponse.status,
-              statusMessage: chipData.message || "Failed to initialize payment",
-            });
+            
+            return response;
+          } catch (err) {
+            clearTimeout(timeoutId);
+            if (err.name === 'AbortError' || err.message.includes('timed out')) {
+              throw new Error('Request timed out. Please try again.');
+            }
+            throw err;
           }
+        };
+        
+        // Attempt the fetch with improved retries
+        const chipResponse = await retry(makeRequest, 3, 2000);
+        
+        console.log("CHIP Response:", chipResponse);
+        console.log("CHIP Response Status:", chipResponse.status);
+        console.log("CHIP Response Status Text:", chipResponse.statusText);
 
-          // Update booking with CHIP purchase ID
+        const chipData = await chipResponse.json();
+        // console.log("CHIP Data:", chipData);
+
+        if (chipResponse.status !== 201) {
+          // If CHIP payment initialization fails, update booking status to failed
+          await knex("booking").where("id", bookingId).update({ 
+            status: 4, // 4 = Failed
+            payment_error: chipData.message || 'Payment initialization failed'
+          });
+
+          throw createError({
+            statusCode: chipResponse.status,
+            statusMessage: chipData.message || "Failed to initialize payment",
+          });
+        }
+
+        // Update booking with CHIP purchase ID
             // await knex("booking")
             //   .where("id", bookingId)
             //   .update({ chip_purchase_id: chipData.id });
@@ -451,92 +454,45 @@ export default defineEventHandler(async (event: H3Event) => {
                 purchase_id: chipData.id,
               },
             };
-          } catch (fetchError: any) {
-            console.error("CHIP payment fetch error:", fetchError);
+          } catch (error: any) {
+            console.error("CHIP payment outer error:", error);
             
-            // Check if we should fallback to manual payment
-            // const allowFallbackToManual = await knex("config")
-            //   .select("value")
-            //   .where("code", "allow_payment_gateway_fallback")
-            //   .first()
-            //   .then(result => result && result.value === "1")
-            //   .catch(() => false);
-              
-            // if (allowFallbackToManual) {
-            //   console.log("Falling back to manual payment method due to payment gateway issues");
-              
-            //   // Update booking to use manual payment method
-            //   await knex("booking")
-            //     .where("id", bookingId)
-            //     .update({ 
-            //       payment_method: 2, // Manual payment
-            //       status: 1 // Pending
-            //     });
-                
-            //   // Get admin phone number for notification
-            //   const adminPhoneNumber = await knex("config")
-            //     .select("value")
-            //     .where("code", "admin_phoneno")
-            //     .first();
+            // Update booking status to failed
+            await knex("booking").where("id", bookingId).update({ 
+              status: 4, // 4 = Failed
+              payment_error: error.message || 'Payment processing failed'
+            });
 
-            //   // Send WhatsApp notification to admin
-            //   await sendWhatsAppNotification(
-            //     adminPhoneNumber.value,
-            //     receiptNumber,
-            //     "admin"
-            //   );
-
-            //   // Send WhatsApp notification to customer
-            //   await sendWhatsAppNotification(body.phone, receiptNumber, "customer");
-
-            //   return {
-            //     status: "success",
-            //     message: "Booking created with manual payment due to payment gateway issues",
-            //     data: `/book-a-session/receipt-qr?booking=${receiptNumber}&status=success&fallback=true`,
-            //   };
-            // }
-            
-            // If fallback is not allowed, proceed with regular error handling
-            await knex("booking").where("id", bookingId).update({ status: 4 });
             throw createError({
-              statusCode: fetchError.statusCode || 500,
-              statusMessage: "Failed to process CHIP payment: " + (fetchError.message || "Connection timeout"),
+              statusCode: error.statusCode || 500,
+              statusMessage: `Failed to process CHIP payment: ${error.message}`,
             });
           }
-        } catch (error: any) {
-          console.error("CHIP payment outer error:", error);
-          // Update booking status to failed
-          await knex("booking").where("id", bookingId).update({ status: 4 });
-          throw createError({
-            statusCode: error.statusCode || 500,
-            statusMessage: error.message || "Internal server error",
-          });
+        } else {
+          // Manual Payment
+
+          const adminPhoneNumber = await knex("config")
+            .select("value")
+            .where("code", "admin_phoneno")
+            .first();
+
+          // Send WhatsApp notification to admin
+          await sendWhatsAppNotification(
+            adminPhoneNumber.value,
+            receiptNumber,
+            "admin"
+          );
+
+          // Send WhatsApp notification to customer
+          await sendWhatsAppNotification(body.phone, receiptNumber, "customer");
+
+          return {
+            status: "success",
+            message: "Booking created successfully",
+            // data: `${process.env.PUBLIC_URL}/book-a-session/receipt-qr?booking=${receiptNumber}&status=success`,
+            data: `/book-a-session/receipt-qr?booking=${receiptNumber}&status=success`,
+          };
         }
-      } else {
-        // Manual Payment
-
-        const adminPhoneNumber = await knex("config")
-          .select("value")
-          .where("code", "admin_phoneno")
-          .first();
-
-        // Send WhatsApp notification to admin
-        await sendWhatsAppNotification(
-          adminPhoneNumber.value,
-          receiptNumber,
-          "admin"
-        );
-
-        // Send WhatsApp notification to customer
-        await sendWhatsAppNotification(body.phone, receiptNumber, "customer");
-
-        return {
-          status: "success",
-          message: "Booking created successfully",
-          // data: `${process.env.PUBLIC_URL}/book-a-session/receipt-qr?booking=${receiptNumber}&status=success`,
-          data: `/book-a-session/receipt-qr?booking=${receiptNumber}&status=success`,
-        };
-      }
     } catch (error: any) {
       throw createError({
         statusCode: error.statusCode || 500,
@@ -662,92 +618,3 @@ async function sendWhatsAppNotification(
         `${
           booking.referral_code
             ? `Referral: *${booking.referral_code}*\n\n`
-            : ""
-        }` +
-        `*Action Required:*\n` +
-        `Please reconfirm the payment details with the customer once the payment is made.\n\n` +
-        `_Please handle this request promptly._`;
-    } else {
-      message =
-        `*Pengesahan Tempahan*\n` +
-        `_${studioName.value}_\n\n` +
-        `Salam dan hi, ${booking.user_fullname}\n\n` +
-        `*Butiran Tempahan Anda:*\n` +
-        `No.​ Rujukan: *${ref}*\n` +
-        `Tema: *${booking.theme_title}*\n` +
-        `Pax: *${booking.number_of_pax} orang*\n` +
-        `Tarikh Sesi: *${formattedDate}*\n` +
-        `Masa Sesi: *${formattedTime}*\n\n` +
-        `Jumlah Bayaran: *RM ${formattedAmount}*\n` +
-        `${
-          booking.referral_code
-            ? `Referral: *${booking.referral_code}*\n\n`
-            : ""
-        }` +
-        `Sila lengkapkan pembayaran untuk mengesahkan tempahan anda & *hantarkan resit ke ${phone}.*\n\n` +
-        `*Lokasi:*\n` +
-        `${wazeUrl ? `🚗 Waze: ${wazeUrl.value}` : ""}\n` +
-        `${googleMapsUrl ? `📍 Google Maps: ${googleMapsUrl.value}` : ""}\n\n` +
-        `Jika anda mempunyai sebarang pertanyaan, sila hubungi kami di ${phone}\n\n` +
-        `_Ini adalah notifikasi automatik. Jangan balas mesej ini._`;
-    }
-
-    const formattedMessage = formatWhatsAppMessage(message);
-
-    // Simulate typing
-    await simulateTyping(wahaEndpoint.value, chatId, formattedMessage);
-
-    // Send the message
-    const response = await fetch(`${wahaEndpoint.value}/api/sendText`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({
-        chatId,
-        text: formattedMessage,
-        session: "default",
-        reply_to: "",
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to send message: ${response.statusText}`);
-    }
-
-    console.log(`Message sent to ${phone}:`, response.status);
-    console.log("Message sent successfully to:", phone);
-    return true;
-  } catch (error) {
-    console.log("Error send whatsapp:", error);
-    return false;
-  }
-}
-
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString("en-MY", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
-}
-
-function formatTime(timeStr: string): string {
-  return new Date(`1970-01-01T${timeStr}`).toLocaleTimeString("en-MY", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
-
-function formatNumber(number: number): string {
-  return number.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}
-
-function formatMalayDate(date: string) {
-  const days = ["Ahad", "Isnin", "Selasa", "Rabu", "Khamis", "Jumaat", "Sabtu"];
-  const d = dayjs(date);
-  return `${days[d.day()]}, ${d.format("DD MMMM YYYY")}`;
-}

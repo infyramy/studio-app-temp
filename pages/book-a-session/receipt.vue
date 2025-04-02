@@ -766,13 +766,13 @@ const statusDisplay = computed(() => {
 });
 
 // Update polling constants for better load handling
-const INITIAL_POLLING_INTERVAL = 1000; // 1s initial interval
-const MAX_POLLING_INTERVAL = 3000; // 3s max interval
-const MAX_POLLING_COUNT = 120; // 2 minutes total with optimized polling
-const STATUS_CHECK_COOLDOWN = 500; // 500ms cooldown between status checks
+const INITIAL_POLLING_INTERVAL = 2000; // 2s initial interval
+const MAX_POLLING_INTERVAL = 5000; // 5s max interval
+const MAX_POLLING_COUNT = 60; // 2 minutes total with optimized polling
+const STATUS_CHECK_COOLDOWN = 1000; // 1s cooldown between status checks
 const BATCH_SIZE = 5; // Number of concurrent status checks
 
-// Add payment state tracking
+// Add payment state tracking with improved status tracking
 const paymentState = ref({
   isProcessing: false,
   lastError: null as string | null,
@@ -780,6 +780,8 @@ const paymentState = ref({
   maxRetries: 3,
   sessionExpired: false,
   lastStatusCheck: 0,
+  consecutiveCompleted: 0, // Track consecutive completed statuses
+  lastStatus: null as string | null,
 });
 
 // Add rate limiting with improved window
@@ -809,7 +811,7 @@ const rateLimiter = {
   }
 };
 
-// Update checkPaymentStatus function with better error handling
+// Update checkPaymentStatus function with better status handling
 async function checkPaymentStatus() {
   const now = Date.now();
   
@@ -839,12 +841,22 @@ async function checkPaymentStatus() {
     const data = await response.json();
     pollingCount.value++;
 
+    // Handle status changes
+    if (data.status !== paymentState.value.lastStatus) {
+      console.log(`Status changed from ${paymentState.value.lastStatus} to ${data.status}`);
+      paymentState.value.consecutiveCompleted = 0;
+    }
+    paymentState.value.lastStatus = data.status;
+
     // Handle different status responses
     switch (data.status) {
       case "completed":
-        stopPolling();
-        await fetchReceiptData();
-        window.location.href = `/book-a-session/receipt?booking=${route.query.booking}&status=success`;
+        paymentState.value.consecutiveCompleted++;
+        if (paymentState.value.consecutiveCompleted >= 3) {
+          stopPolling();
+          await fetchReceiptData();
+          window.location.href = `/book-a-session/receipt?booking=${route.query.booking}&status=success`;
+        }
         break;
 
       case "partial":
@@ -1140,6 +1152,8 @@ onUnmounted(() => {
     maxRetries: 3,
     sessionExpired: false,
     lastStatusCheck: 0,
+    consecutiveCompleted: 0,
+    lastStatus: null,
   };
 });
 
