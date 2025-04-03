@@ -103,8 +103,7 @@ export default defineEventHandler(async (event: H3Event) => {
     await knex('booking')
       .where('id', bookingId)
       .update({ 
-        chip_purchase_id: data.id,
-        payment_initiated_at: new Date().toISOString()
+        chip_purchase_id: data.id
       })
 
     return data
