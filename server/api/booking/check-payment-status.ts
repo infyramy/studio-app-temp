@@ -85,19 +85,24 @@ const statusCache = new PaymentStatusCache(1000, 1000); // 1000 entries, 1 secon
 
 export default defineEventHandler(async (event) => {
   try {
+    console.log("------- Checking payment status -------");
     const query = getQuery(event);
     const purchaseId = query.purchase_id as string;
 
     if (!purchaseId) {
+      console.error("Missing purchase_id in query");
       throw createError({
         statusCode: 400,
         message: "Purchase ID is required",
       });
     }
 
+    console.log("Checking status for purchase ID:", purchaseId);
+
     // Check cache first
     const cachedStatus = statusCache.get(purchaseId);
     if (cachedStatus) {
+      console.log("Retrieved status from cache:", cachedStatus);
       return {
         status: cachedStatus.status,
         message: "Payment status retrieved from cache",
@@ -108,6 +113,7 @@ export default defineEventHandler(async (event) => {
 
     // Check if we should retry based on previous attempts
     if (!statusCache.shouldRetry(purchaseId)) {
+      console.log("Maximum retry attempts reached for purchase ID:", purchaseId);
       return {
         status: "error",
         message: "Maximum retry attempts reached. Please contact support.",
@@ -117,12 +123,15 @@ export default defineEventHandler(async (event) => {
 
     // Get booking details
     const [booking] = await knex("booking")
-      .select("status", "payment_ref_number", "payment_initiated_at")
+      .select("status", "payment_ref_number", "payment_initiated_at", "payment_status")
       .where("chip_purchase_id", purchaseId)
       .whereIn("status", [1, 2, 3, 4])
       .limit(1);
 
+    console.log("Found booking:", booking);
+
     if (!booking) {
+      console.error("No booking found for purchase ID:", purchaseId);
       throw createError({
         statusCode: 404,
         message: "Booking not found",
@@ -135,11 +144,19 @@ export default defineEventHandler(async (event) => {
       const now = new Date();
       const diffMinutes = (now.getTime() - initiatedAt.getTime()) / (1000 * 60);
       
+      console.log("Payment initiated:", initiatedAt);
+      console.log("Time elapsed (minutes):", diffMinutes);
+      
       if (diffMinutes > 30 && booking.status === 1) {
+        console.log("Payment session expired");
         // Update booking status to failed
         await knex("booking")
           .where("chip_purchase_id", purchaseId)
-          .update({ status: 4 });
+          .update({ 
+            status: 4,
+            payment_status: "expired",
+            updated_at: new Date()
+          });
         
         return {
           status: "failed",
@@ -150,15 +167,22 @@ export default defineEventHandler(async (event) => {
     }
 
     const status = STATUS_MAP[booking.status as keyof typeof STATUS_MAP] || booking.status;
+    console.log("Current booking status:", {
+      rawStatus: booking.status,
+      mappedStatus: status,
+      paymentStatus: booking.payment_status
+    });
 
     // Update cache
     statusCache.set(purchaseId, status);
+    console.log("Updated status cache for purchase ID:", purchaseId);
 
     return {
       status,
       message: "Payment status retrieved successfully",
       cached: false,
-      retryCount: 0
+      retryCount: 0,
+      paymentStatus: booking.payment_status
     };
   } catch (error: any) {
     console.error("Error checking payment status:", error);
