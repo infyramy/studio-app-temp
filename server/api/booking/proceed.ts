@@ -565,14 +565,14 @@ export default defineEventHandler(async (event: H3Event) => {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
-                Authorization: `Bearer ${process.env.CHIP_SECRET_KEY}`,
+                Authorization: `Bearer ${CHIP_SECRET_KEY.value}`,
               },
               body: JSON.stringify({
                 success_callback: `${process.env.PUBLIC_API_URL}/api/booking/payment-callback`,
                 success_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=success`,
                 failure_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=failed`,
                 cancel_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=cancelled`,
-                brand_id: process.env.CHIP_BRAND_ID,
+                brand_id: CHIP_BRAND_ID.value,
                 title: themeData.title,
                 currency: "MYR",
                 amount: paymentTotal,
