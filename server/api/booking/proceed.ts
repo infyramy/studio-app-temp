@@ -544,8 +544,41 @@ export default defineEventHandler(async (event: H3Event) => {
               }
 
               return responseData;
-            } catch (err) {
+            } catch (err: any) {
               clearTimeout(timeoutId);
+              console.error("Network error details:", err);
+              
+              // Check for specific connection errors
+              if (err.name === 'AbortError') {
+                throw new Error("Connection timed out when contacting CHIP API");
+              }
+              
+              if (err.code === 'ECONNREFUSED' || err.code === 'UND_ERR_CONNECT_TIMEOUT') {
+                throw new Error("Unable to connect to CHIP payment gateway. Please check your network settings.");
+              }
+              
+              // Try alternative CHIP API endpoint if available
+              try {
+                console.log("Trying alternative CHIP API endpoint");
+                const altResponse = await fetch("https://api.chip-in.asia/v1/purchases/", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${CHIP_SECRET_KEY.value}`,
+                  },
+                  body: JSON.stringify(chipRequestBody),
+                  signal: AbortSignal.timeout(30000),
+                });
+                
+                if (altResponse.ok) {
+                  const altData = await altResponse.json();
+                  console.log("Alternative CHIP endpoint successful");
+                  return altData;
+                }
+              } catch (altErr) {
+                console.error("Alternative endpoint also failed:", altErr);
+              }
+              
               throw err;
             }
           },

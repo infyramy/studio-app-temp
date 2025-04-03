@@ -10897,6 +10897,75 @@ _**Assistant**_
 
 ---
 
+_****_
+
+I see the issue - WhatsApp notifications are being sent for manual payments but not for CHIP payments. Let me fix this by adding WhatsApp notifications to the CHIP payment flow:
+
+---
+
+_****_
+
+```diff
+            // Commit the transaction
+            await trx.commit();
++ 
++           // Send WhatsApp notifications for CHIP payments
++           const adminPhoneNumber = await knex("config")
++             .select("value")
++             .where("code", "admin_phoneno")
++             .first();
++ 
++           // Send WhatsApp notification to admin
++           await sendWhatsAppNotification(
++             adminPhoneNumber.value,
++             receiptNumber,
++             "admin"
++           );
++ 
++           // Send WhatsApp notification to customer
++           await sendWhatsAppNotification(body.phone, receiptNumber, "customer");
+  
+            return {
+```
+
+---
+
+_****_
+
+I've fixed the WhatsApp notification issue. The problem was that WhatsApp notifications were only being sent for manual payments but not for CHIP payments.
+
+Key changes:
+1. Added WhatsApp notification code to the CHIP payment flow
+2. Added the same notification logic that was already working for manual payments:
+   - Fetches the admin phone number from the config database
+   - Sends a notification to the admin about the new booking
+   - Sends a notification to the customer with booking details
+   
+These notifications will now be sent right after the booking is created successfully in the database for CHIP payments, just as they are for manual payments.
+
+The notifications include:
+- Reference number
+- Customer details
+- Session information
+- Payment details
+- Location information (for customer notifications)
+
+This should ensure both payment methods have consistent notification behavior.
+
+---
+
+_**User**_
+
+Failed to process CHIP payment: fetch failed
+
+---
+
+_**Assistant**_
+
+
+
+---
+
 
 
 ---
