@@ -576,7 +576,7 @@ export default defineEventHandler(async (event: H3Event) => {
             full_name: body.name,
             email: body.email,
           },
-          success_callback: `${process.env.PUBLIC_API_URL}/api/booking/payment-callback`,
+          success_callback: `${process.env.PUBLIC_API_URL}/booking/payment-callback`,
           success_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=success`,
           failure_redirect: `${process.env.PUBLIC_URL}/book-a-session/failed-payment?booking=${receiptNumber}&status=failed`,
           cancel_redirect: `${process.env.PUBLIC_URL}/book-a-session/failed-payment?booking=${receiptNumber}&status=cancelled`,
@@ -584,75 +584,123 @@ export default defineEventHandler(async (event: H3Event) => {
           skip_capture: false,
         };
 
-        console.log("CHIP Request Body:", JSON.stringify(chipRequestBody, null, 2));
-        console.log("Success Callback URL:", chipRequestBody.success_callback);
+        console.log("CHIP Request Body:", JSON.stringify(chipRequestBody));
 
-        // Make the request to CHIP API
-        console.log("Making request to CHIP API...");
-        const response = await fetch("https://gate.chip-in.asia/api/v1/purchases", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${CHIP_SECRET_KEY.value}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(chipRequestBody),
-        });
-
-        // Log response details
-        console.log("CHIP API Response Status:", response.status);
-        console.log("CHIP API Response Headers:", Object.fromEntries(response.headers.entries()));
-
-        // Get response text first to check if it's valid JSON
-        const responseText = await response.text();
-        console.log("CHIP API Raw Response:", responseText);
-
-        let chipData;
         try {
-          chipData = JSON.parse(responseText);
-        } catch (parseError) {
-          console.error("Failed to parse CHIP API response:", parseError);
-          console.error("Response was not valid JSON:", responseText);
+          // Use retry mechanism with the fetch request
+          const makeRequest = async () => {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 seconds timeout
+            
+            try {
+              const response = await fetch(
+                "https://gate.chip-in.asia/api/v1/purchases/",
+                {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${CHIP_SECRET_KEY.value}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify(chipRequestBody),
+                  signal: controller.signal
+                }
+              );
+              
+              clearTimeout(timeoutId);
+              return response;
+            } catch (err) {
+              clearTimeout(timeoutId);
+              throw err;
+            }
+          };
+          
+          // Attempt the fetch with retries
+          const chipResponse = await retry(makeRequest, 3, 2000);
+          
+          console.log("CHIP Response:", chipResponse);
+          console.log("CHIP Response Status:", chipResponse.status);
+          console.log("CHIP Response Status Text:", chipResponse.statusText);
+
+          const chipData = await chipResponse.json();
+          // console.log("CHIP Data:", chipData);
+
+          if (chipResponse.status !== 201) {
+            // If CHIP payment initialization fails, update booking status to failed
+            await knex("booking").where("id", bookingId).update({ status: 4 }); // 4 = Failed
+
+            throw createError({
+              statusCode: chipResponse.status,
+              statusMessage: chipData.message || "Failed to initialize payment",
+            });
+          }
+
+          // Update booking with CHIP purchase ID
+          // await knex("booking")
+          //   .where("id", bookingId)
+          //   .update({ chip_purchase_id: chipData.id });
+
+          return {
+            status: "success",
+            message: "Booking created and payment initialized successfully",
+            data: {
+              booking_id: bookingId,
+              receipt_number: receiptNumber,
+              checkout_url: chipData.checkout_url,
+              purchase_id: chipData.id,
+            },
+          };
+        } catch (fetchError: any) {
+          console.error("CHIP payment fetch error:", fetchError);
+          
+          // Check if we should fallback to manual payment
+          // const allowFallbackToManual = await knex("config")
+          //   .select("value")
+          //   .where("code", "allow_payment_gateway_fallback")
+          //   .first()
+          //   .then(result => result && result.value === "1")
+          //   .catch(() => false);
+            
+          // if (allowFallbackToManual) {
+          //   console.log("Falling back to manual payment method due to payment gateway issues");
+            
+          //   // Update booking to use manual payment method
+          //   await knex("booking")
+          //     .where("id", bookingId)
+          //     .update({ 
+          //       payment_method: 2, // Manual payment
+          //       status: 1 // Pending
+          //     });
+                
+          //   // Get admin phone number for notification
+          //   const adminPhoneNumber = await knex("config")
+          //     .select("value")
+          //     .where("code", "admin_phoneno")
+          //     .first();
+
+          //   // Send WhatsApp notification to admin
+          //   await sendWhatsAppNotification(
+          //     adminPhoneNumber.value,
+          //     receiptNumber,
+          //     "admin"
+          //   );
+
+          //   // Send WhatsApp notification to customer
+          //   await sendWhatsAppNotification(body.phone, receiptNumber, "customer");
+
+          //   return {
+          //     status: "success",
+          //     message: "Booking created with manual payment due to payment gateway issues",
+          //     data: `/book-a-session/receipt-qr?booking=${receiptNumber}&status=success&fallback=true`,
+          //   };
+          // }
+          
+          // If fallback is not allowed, proceed with regular error handling
+          await knex("booking").where("id", bookingId).update({ status: 4 });
           throw createError({
-            statusCode: 500,
-            statusMessage: "Invalid response from CHIP API. Please check your API credentials and try again.",
+            statusCode: fetchError.statusCode || 500,
+            statusMessage: "Failed to process CHIP payment: " + (fetchError.message || "Connection timeout"),
           });
         }
-
-        console.log("CHIP API Parsed Response:", JSON.stringify(chipData, null, 2));
-
-        if (!response.ok) {
-          console.error("CHIP API Error Response:", chipData);
-          throw createError({
-            statusCode: response.status,
-            statusMessage: chipData.message || "Failed to initialize CHIP payment",
-          });
-        }
-
-        // Validate required fields in response
-        if (!chipData.id || !chipData.checkout_url) {
-          console.error("Missing required fields in CHIP response:", chipData);
-          throw createError({
-            statusCode: 500,
-            statusMessage: "Invalid response from CHIP API: missing required fields",
-          });
-        }
-
-        // Update booking with CHIP purchase ID
-        await knex("booking")
-          .where("id", bookingId)
-          .update({ 
-            chip_purchase_id: chipData.id,
-            payment_initiated_at: new Date().toISOString()
-          });
-
-        return {
-          status: "success",
-          message: "CHIP payment initialized successfully",
-          data: {
-            checkout_url: chipData.checkout_url,
-            purchase_id: chipData.id,
-          },
-        };
       } catch (error: any) {
         console.error("CHIP payment outer error:", error);
         

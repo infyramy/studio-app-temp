@@ -1057,11 +1057,23 @@ async function updateBookingStatus(status: string) {
     const response = await fetch(
       `/api/booking/update-status?receiptNumber=${route.query.booking}&status=${status}`
     );
+
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || "Failed to update booking status");
+      const errorData = await response.json();
+      throw new Error(errorData.message || "Failed to update booking status");
     }
-    return await response.json();
+
+    const data = await response.json();
+    console.log("Status update response:", data);
+
+    // If the status was already successful, we don't need to update
+    if (data.message?.includes("already successful")) {
+      return data;
+    }
+
+    // Refresh receipt data to get updated status
+    await fetchReceiptData();
+    return data;
   } catch (err: any) {
     console.error("Error updating booking status:", err);
     throw err;
@@ -1142,6 +1154,8 @@ onMounted(async () => {
           await fetchReceiptData();
         } catch (err) {
           console.error("Error updating booking status:", err);
+          // Don't show error to user if status update fails
+          // Just continue with the current status
         }
       }
 

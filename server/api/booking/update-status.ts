@@ -61,6 +61,15 @@ export default defineEventHandler(async (event: H3Event) => {
       updated_date: new Date(),
     });
 
+    // Log status transition
+    await knex("booking_status_log").insert({
+      booking_id: booking.id,
+      old_status: booking.status,
+      new_status: paymentStatus,
+      payment_status: status,
+      created_at: new Date(),
+    });
+
     return {
       statusCode: 200,
       status: "success",

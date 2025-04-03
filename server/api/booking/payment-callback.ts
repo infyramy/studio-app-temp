@@ -3,6 +3,7 @@ import knex from "~/server/utils/knex";
 import { sendWhatsAppNotification } from "~/server/utils/whatsapp";
 import crypto from 'crypto';
 
+const CHIP_SECRET_KEY = process.env.CHIP_SECRET_KEY;
 const WEBHOOK_SIGNATURE_HEADER = 'x-chip-signature';
 
 // Status mapping
@@ -15,20 +16,9 @@ const STATUS_MAP = {
 } as const;
 
 // Verify CHIP webhook signature
-async function verifyWebhookSignature(payload: string, signature: string): Promise<boolean> {
+function verifyWebhookSignature(payload: string, signature: string): boolean {
   try {
-    // Get CHIP secret key from database
-    const [chipKey] = await knex("config")
-      .select("value")
-      .where("code", "chip_key")
-      .limit(1);
-
-    if (!chipKey?.value) {
-      console.error("CHIP secret key not found in database");
-      return false;
-    }
-
-    const hmac = crypto.createHmac('sha256', chipKey.value);
+    const hmac = crypto.createHmac('sha256', CHIP_SECRET_KEY || '');
     const calculatedSignature = hmac.update(payload).digest('hex');
     return crypto.timingSafeEqual(
       Buffer.from(signature),
@@ -48,18 +38,11 @@ interface WebhookBody {
 
 export default defineEventHandler(async (event) => {
   try {
-    console.log("------- Payment callback received -------");
-    console.log("Headers:", event.headers);
-    
     const body = await readBody<WebhookBody>(event);
-    console.log("Webhook body:", body);
-    
     const signature = getHeader(event, WEBHOOK_SIGNATURE_HEADER);
-    console.log("Webhook signature:", signature);
 
     // Verify webhook signature
-    if (!signature) {
-      console.error("Missing signature");
+    if (!signature || !CHIP_SECRET_KEY) {
       throw createError({
         statusCode: 400,
         message: "Invalid webhook signature"
@@ -68,11 +51,7 @@ export default defineEventHandler(async (event) => {
 
     // Verify signature using raw body
     const rawBody = JSON.stringify(body);
-    const isValidSignature = await verifyWebhookSignature(rawBody, signature);
-    console.log("Signature verification result:", isValidSignature);
-    
-    if (!isValidSignature) {
-      console.error("Signature verification failed");
+    if (!verifyWebhookSignature(rawBody, signature)) {
       throw createError({
         statusCode: 400,
         message: "Webhook signature verification failed"
@@ -86,10 +65,7 @@ export default defineEventHandler(async (event) => {
       .whereNot("status", STATUS_MAP[body.status as keyof typeof STATUS_MAP] || 4)
       .limit(1);
 
-    console.log("Found booking:", booking);
-
     if (!booking) {
-      console.log("No booking found or already processed");
       return { 
         success: true,
         message: "Booking already processed or not found"
@@ -98,12 +74,6 @@ export default defineEventHandler(async (event) => {
 
     // Update booking status
     const newStatus = STATUS_MAP[body.status as keyof typeof STATUS_MAP] || 4;
-    console.log("Updating booking status:", {
-      oldStatus: booking.status,
-      newStatus,
-      paymentStatus: body.status
-    });
-
     await knex("booking")
       .where("id", booking.id)
       .update({
@@ -124,7 +94,6 @@ export default defineEventHandler(async (event) => {
 
     // Send notifications based on status
     if (body.status === "paid") {
-      console.log("Sending WhatsApp notification for paid booking");
       await sendWhatsAppNotification(
         booking.user_phoneno,
         booking.payment_ref_number,
@@ -135,7 +104,6 @@ export default defineEventHandler(async (event) => {
       );
     }
 
-    console.log("------- Payment callback processed successfully -------");
     return { 
       success: true,
       message: `Payment ${body.status} processed successfully`
