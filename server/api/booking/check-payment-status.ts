@@ -171,9 +171,9 @@ export default defineEventHandler(async (event) => {
       };
     }
 
-    // Get booking details
+    // Get booking details - remove payment_initiated_at from selection
     const [booking] = await knex("booking")
-      .select("status", "payment_ref_number", "payment_initiated_at")
+      .select("status", "payment_ref_number", "created_date")
       .where("chip_purchase_id", purchaseId)
       .whereIn("status", [1, 2, 3, 4])
       .limit(1);
@@ -185,11 +185,11 @@ export default defineEventHandler(async (event) => {
       });
     }
 
-    // Check if payment has expired (30 minutes)
-    if (booking.payment_initiated_at) {
-      const initiatedAt = new Date(booking.payment_initiated_at);
+    // Check if payment has expired (30 minutes) - using created_date instead of payment_initiated_at
+    if (booking.created_date) {
+      const createdAt = new Date(booking.created_date);
       const now = new Date();
-      const diffMinutes = (now.getTime() - initiatedAt.getTime()) / (1000 * 60);
+      const diffMinutes = (now.getTime() - createdAt.getTime()) / (1000 * 60);
       
       if (diffMinutes > 30 && booking.status === 1) {
         // Update booking status to failed
