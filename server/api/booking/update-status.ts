@@ -75,16 +75,6 @@ export default defineEventHandler(async (event: H3Event) => {
       status: paymentStatus
     });
 
-    // Log status transition
-    console.log("Logging status transition in booking_status_log");
-    await knex("booking_status_log").insert({
-      booking_id: booking.id,
-      old_status: booking.status,
-      new_status: paymentStatus,
-      payment_status: status,
-      created_at: new Date(),
-    });
-
     console.log("Status update completed successfully");
     return {
       statusCode: 200,
