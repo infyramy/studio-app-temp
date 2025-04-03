@@ -10199,7 +10199,170 @@ i dont use secret key from env, i use from db
 
 _**Assistant**_
 
+Ah, I see the issue. The payment callback is trying to use `CHIP_SECRET_KEY` from environment variables, but you're storing it in the database. Let me fix that:
 
+
+---
+
+_****_
+
+```diff
+  import crypto from 'crypto';
+  
+- const CHIP_SECRET_KEY = process.env.CHIP_SECRET_KEY;
+  const WEBHOOK_SIGNATURE_HEADER = 'x-chip-signature';
+  
+  
+  // Verify CHIP webhook signature
+- function verifyWebhookSignature(payload: string, signature: string): boolean {
++ async function verifyWebhookSignature(payload: string, signature: string): Promise<boolean> {
+    try {
+-     const hmac = crypto.createHmac('sha256', CHIP_SECRET_KEY || '');
++     // Get CHIP secret key from database
++     const [chipKey] = await knex("config")
++       .select("value")
++       .where("code", "chip_key")
++       .limit(1);
++ 
++     if (!chipKey?.value) {
++       console.error("CHIP secret key not found in database");
++       return false;
++     }
++ 
++     const hmac = crypto.createHmac('sha256', chipKey.value);
+      const calculatedSignature = hmac.update(payload).digest('hex');
+      return crypto.timingSafeEqual(
+  
+      // Verify webhook signature
+-     if (!signature || !CHIP_SECRET_KEY) {
+-       console.error("Missing signature or CHIP_SECRET_KEY");
++     if (!signature) {
++       console.error("Missing signature");
+        throw createError({
+          statusCode: 400,
+      // Verify signature using raw body
+      const rawBody = JSON.stringify(body);
+-     const isValidSignature = verifyWebhookSignature(rawBody, signature);
++     const isValidSignature = await verifyWebhookSignature(rawBody, signature);
+      console.log("Signature verification result:", isValidSignature);
+      
+```
+
+---
+
+_****_
+
+I've updated the payment callback handler to:
+
+1. Remove the environment variable dependency for `CHIP_SECRET_KEY`
+2. Fetch the secret key from the database using the `config` table
+3. Made the `verifyWebhookSignature` function async to handle the database query
+4. Added better error handling and logging for when the secret key is not found
+
+The linter error is related to the WhatsApp notification function parameters, but that's a separate issue from the CHIP secret key problem.
+
+Now the payment callback should work correctly with the secret key from your database. The flow will be:
+
+1. CHIP sends a webhook to your callback URL
+2. The handler fetches the secret key from the database
+3. Verifies the webhook signature using the database key
+4. Processes the payment status update if verification succeeds
+
+Please try the payment process again. The logs should now show:
+1. The webhook being received
+2. The secret key being fetched from the database
+3. The signature verification result
+4. The status update process
+
+Let me know if you still encounter any issues!
+
+---
+
+_**User**_
+
+Failed to process CHIP payment: Unexpected token < in JSON at position 1
+
+---
+
+_**Assistant**_
+
+This error typically occurs when the response from the CHIP API is not valid JSON, often because it's returning an HTML error page instead. Let me help you fix this by adding better error handling and logging to the CHIP payment initialization:
+
+
+
+---
+
+_****_
+
+```diff
+  
+          // Make the request to CHIP API
++         console.log("Making request to CHIP API...");
+          const response = await fetch("https://gate.chip-in.asia/api/v1/purchases", {
+            method: "POST",
+          });
+  
+-         const chipData = await response.json();
+-         console.log("CHIP API Response:", JSON.stringify(chipData, null, 2));
++         // Log response details
++         console.log("CHIP API Response Status:", response.status);
++         console.log("CHIP API Response Headers:", Object.fromEntries(response.headers.entries()));
++ 
++         // Get response text first to check if it's valid JSON
++         const responseText = await response.text();
++         console.log("CHIP API Raw Response:", responseText);
++ 
++         let chipData;
++         try {
++           chipData = JSON.parse(responseText);
++         } catch (parseError) {
++           console.error("Failed to parse CHIP API response:", parseError);
++           console.error("Response was not valid JSON:", responseText);
++           throw createError({
++             statusCode: 500,
++             statusMessage: "Invalid response from CHIP API. Please check your API credentials and try again.",
++           });
++         }
++ 
++         console.log("CHIP API Parsed Response:", JSON.stringify(chipData, null, 2));
+  
+          if (!response.ok) {
+-           console.error("CHIP API Error:", chipData);
++           console.error("CHIP API Error Response:", chipData);
+            throw createError({
+              statusCode: response.status,
+              statusMessage: chipData.message || "Failed to initialize CHIP payment",
+            });
+          }
++ 
++         // Validate required fields in response
++         if (!chipData.id || !chipData.checkout_url) {
++           console.error("Missing required fields in CHIP response:", chipData);
++           throw createError({
++             statusCode: 500,
++             statusMessage: "Invalid response from CHIP API: missing required fields",
++           });
++         }
+  
+          // Update booking with CHIP purchase ID
+```
+
+---
+
+_****_
+
+I've updated the CHIP payment initialization to:
+
+1. Add detailed logging of the API request and response
+2. Handle the response as text first to check if it's valid JSON
+3. Add better error handling for invalid JSON responses
+4. Validate required fields in the response
+5. Provide more detailed error messages
+
+The error you're seeing ("Unexpected token < in JSON at position 1") typically means one of these things:
+
+1. The CHIP API credentials are invalid or expired
+2. The API endpoint is returning an HTML error page instead of
 
 ---
 

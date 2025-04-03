@@ -588,6 +588,7 @@ export default defineEventHandler(async (event: H3Event) => {
         console.log("Success Callback URL:", chipRequestBody.success_callback);
 
         // Make the request to CHIP API
+        console.log("Making request to CHIP API...");
         const response = await fetch("https://gate.chip-in.asia/api/v1/purchases", {
           method: "POST",
           headers: {
@@ -597,14 +598,42 @@ export default defineEventHandler(async (event: H3Event) => {
           body: JSON.stringify(chipRequestBody),
         });
 
-        const chipData = await response.json();
-        console.log("CHIP API Response:", JSON.stringify(chipData, null, 2));
+        // Log response details
+        console.log("CHIP API Response Status:", response.status);
+        console.log("CHIP API Response Headers:", Object.fromEntries(response.headers.entries()));
+
+        // Get response text first to check if it's valid JSON
+        const responseText = await response.text();
+        console.log("CHIP API Raw Response:", responseText);
+
+        let chipData;
+        try {
+          chipData = JSON.parse(responseText);
+        } catch (parseError) {
+          console.error("Failed to parse CHIP API response:", parseError);
+          console.error("Response was not valid JSON:", responseText);
+          throw createError({
+            statusCode: 500,
+            statusMessage: "Invalid response from CHIP API. Please check your API credentials and try again.",
+          });
+        }
+
+        console.log("CHIP API Parsed Response:", JSON.stringify(chipData, null, 2));
 
         if (!response.ok) {
-          console.error("CHIP API Error:", chipData);
+          console.error("CHIP API Error Response:", chipData);
           throw createError({
             statusCode: response.status,
             statusMessage: chipData.message || "Failed to initialize CHIP payment",
+          });
+        }
+
+        // Validate required fields in response
+        if (!chipData.id || !chipData.checkout_url) {
+          console.error("Missing required fields in CHIP response:", chipData);
+          throw createError({
+            statusCode: 500,
+            statusMessage: "Invalid response from CHIP API: missing required fields",
           });
         }
 
