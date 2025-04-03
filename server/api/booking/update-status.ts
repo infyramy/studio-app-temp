@@ -72,8 +72,7 @@ export default defineEventHandler(async (event: H3Event) => {
     console.log("Updating booking status to:", paymentStatus);
     await knex("booking").where("payment_ref_number", receiptNumber).update({
       payment_date: new Date(),
-      status: paymentStatus,
-      updated_date: new Date(),
+      status: paymentStatus
     });
 
     // Log status transition
