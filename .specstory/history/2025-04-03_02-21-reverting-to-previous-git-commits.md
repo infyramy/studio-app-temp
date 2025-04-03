@@ -8793,13 +8793,179 @@ Let me help fix these issues:
 
 _****_
 
-Cancelled
+```diff
+  }
+  
+- // Validate time format (HH:mm)
++ // Validate time format (HH:mm or HH:mm:ss)
+  function isValidTime(timeStr: string): boolean {
+-   const regex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
+-   return regex.test(timeStr);
++   // First try HH:mm format
++   const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
++   if (timeRegex.test(timeStr)) return true;
++ 
++   // Then try HH:mm:ss format
++   const timeWithSecondsRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/;
++   if (timeWithSecondsRegex.test(timeStr)) {
++     // If it has seconds, strip them for consistency
++     return true;
++   }
++ 
++   return false;
++ }
++ 
++ // Add a helper function to normalize time format
++ function normalizeTime(timeStr: string): string {
++   // If time includes seconds, strip them
++   if (timeStr.includes(':')) {
++     const parts = timeStr.split(':');
++     return `${parts[0]}:${parts[1]}`;
++   }
++   return timeStr;
+  }
+  
+        });
+      }
++ 
++     // Normalize and validate time
++     const normalizedTime = normalizeTime(body.time);
++     if (!isValidTime(normalizedTime)) {
++       throw createError({
++         statusCode: 400,
++         statusMessage: "Invalid time format. Expected HH:mm or HH:mm:ss",
++       });
++     }
++ 
++     // Update the time in the request body
++     body.time = normalizedTime;
+  
+      // Validate email and phone
+```
 
 ---
 
 _****_
 
+2. Now, let's add more detailed logging for the payment amount calculation to help identify where the mismatch is occurring:
 
+
+---
+
+_****_
+
+```diff
+        // Fixed price
+        basePrice = themeData.price;
++       console.log("Using fixed price:", basePrice);
+      } else if (themeData.price_type === 2) {
+        // Pax-based pricing
+        }
+        basePrice = applicablePaxPrice.price;
++       console.log("Using pax-based price:", {
++         basePrice,
++         numberOfPax: body.number_of_pax,
++         applicablePaxPrice
++       });
+      }
+  
+        knex("config").select("value").where("code", "max_free_pax").first(),
+      ]);
++ 
++     console.log("Configuration values:", {
++       chargePerPax: chargePerPax?.value,
++       maxFreePax: maxFreePax?.value
++     });
+  
+      // Check for date-specific price adjustment
+            // Fixed amount adjustment
+            datePriceAdjustment = applicableDatePrice.amount;
++           console.log("Using fixed date adjustment:", datePriceAdjustment);
+          } else if (applicableDatePrice.price_type === 2) {
+            // Percentage adjustment
+            datePriceAdjustment = (basePrice * applicableDatePrice.amount) / 100;
++           console.log("Using percentage date adjustment:", {
++             percentage: applicableDatePrice.amount,
++             adjustment: datePriceAdjustment
++           });
+          }
+        }
+      let addonsTotal = 0;
+      if (body.add_ons?.length > 0) {
++       console.log("Processing add-ons:", body.add_ons);
+        for (const addon of body.add_ons) {
+          const addonData = await knex("addon").where("id", addon.id).first();
+          addonsTotal += addonData.price * addon.quantity;
+        }
++       console.log("Add-ons total:", addonsTotal);
+      }
+  
+          (body.number_of_pax - parseInt(maxFreePax.value)) *
+          parseInt(chargePerPax.value);
++       console.log("Extra pax charge:", {
++         numberOfPax: body.number_of_pax,
++         maxFreePax: parseInt(maxFreePax.value),
++         chargePerPax: parseInt(chargePerPax.value),
++         extraPaxCharge
++       });
+      }
+  
+        paymentTotal,
+        receivedAmount: body.payment_amount,
+-       difference: Math.abs(body.payment_amount - paymentTotal)
++       difference: Math.abs(body.payment_amount - paymentTotal),
++       paymentType: body.payment_type,
++       paymentMethod: body.payment_method
+      });
+  
+```
+
+---
+
+_****_
+
+I've made two major changes to help fix the issues:
+
+1. Time Format Fix:
+   - Updated the time validation to accept both HH:mm and HH:mm:ss formats
+   - Added a normalizeTime function to strip seconds from time values
+   - Added validation and normalization of the time before processing
+
+2. Payment Amount Calculation Logging:
+   - Added detailed logging at each step of the payment calculation
+   - Added logging for configuration values
+   - Added logging for add-ons processing
+   - Added logging for extra pax charges
+   - Enhanced the final payment calculation log with more details
+
+Could you try the booking process again? The new logs will help us identify exactly where the payment amount mismatch is occurring. Please share the logs when you get the error, and I can help pinpoint the exact issue.
+
+Also, make sure that:
+1. The frontend is sending the correct payment amount
+2. The payment type (full/deposit) is correctly set
+3. The number of pax and add-ons are correctly calculated
+
+The detailed logs will show us:
+- The base price calculation
+- Any date-specific adjustments
+- Add-ons processing
+- Extra pax charges
+- The final total calculation
+- The received amount from the frontend
+
+This will help us identify exactly where the mismatch is happening.
+
+---
+
+_**User**_
+
+Payment amount mismatch. Expected: 120, Received: 50
+
+---
+
+_**Assistant**_
+
+I see the issue. The payment amount mismatch is occurring because the frontend is sending a deposit amount (50) but the backend is calculating the full amount (120). Let me help fix this 
 
 ---
 

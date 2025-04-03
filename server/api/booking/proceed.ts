@@ -89,18 +89,12 @@ function isValidDate(dateStr: string): boolean {
 
 // Validate time format (HH:mm or HH:mm:ss)
 function isValidTime(timeStr: string): boolean {
-  // First try HH:mm format
+  // First normalize the time string
+  const normalizedTime = normalizeTime(timeStr);
+  
+  // Then validate the normalized time
   const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
-  if (timeRegex.test(timeStr)) return true;
-
-  // Then try HH:mm:ss format
-  const timeWithSecondsRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/;
-  if (timeWithSecondsRegex.test(timeStr)) {
-    // If it has seconds, strip them for consistency
-    return true;
-  }
-
-  return false;
+  return timeRegex.test(normalizedTime);
 }
 
 // Add a helper function to normalize time format
@@ -242,7 +236,7 @@ export default defineEventHandler(async (event: H3Event) => {
       });
     }
 
-    // Update the time in the request body
+    // Update the time in the request body with normalized format
     body.time = normalizedTime;
 
     // Validate email and phone
@@ -413,6 +407,11 @@ export default defineEventHandler(async (event: H3Event) => {
     const paymentTotal =
       subtotalBeforeAdjustments + datePriceAdjustment + extraPaxCharge;
 
+    // Calculate the expected payment amount based on payment type
+    const expectedPaymentAmount = body.payment_type === 2 
+      ? themeData.deposit // Use deposit amount if payment type is deposit
+      : paymentTotal;    // Use full amount if payment type is full payment
+
     // Add detailed logging for payment calculation
     console.log("Payment Calculation Details:", {
       basePrice,
@@ -421,22 +420,26 @@ export default defineEventHandler(async (event: H3Event) => {
       extraPaxCharge,
       subtotalBeforeAdjustments,
       paymentTotal,
+      expectedPaymentAmount,
       receivedAmount: body.payment_amount,
-      difference: Math.abs(body.payment_amount - paymentTotal),
+      difference: Math.abs(body.payment_amount - expectedPaymentAmount),
       paymentType: body.payment_type,
-      paymentMethod: body.payment_method
+      paymentMethod: body.payment_method,
+      depositAmount: themeData.deposit
     });
 
     // Validate payment amount before proceeding
-    if (Math.abs(body.payment_amount - paymentTotal) > 0.01) {
+    if (Math.abs(body.payment_amount - expectedPaymentAmount) > 0.01) {
       console.error("Payment Amount Mismatch:", {
-        expected: paymentTotal,
+        expected: expectedPaymentAmount,
         received: body.payment_amount,
-        difference: Math.abs(body.payment_amount - paymentTotal)
+        difference: Math.abs(body.payment_amount - expectedPaymentAmount),
+        paymentType: body.payment_type === 1 ? 'Full Payment' : 'Deposit',
+        depositAmount: themeData.deposit
       });
       throw createError({
         statusCode: 400,
-        statusMessage: `Payment amount mismatch. Expected: ${paymentTotal}, Received: ${body.payment_amount}`,
+        statusMessage: `Payment amount mismatch. Expected: ${expectedPaymentAmount}, Received: ${body.payment_amount} (Payment Type: ${body.payment_type === 1 ? 'Full Payment' : 'Deposit'})`,
       });
     }
 
