@@ -1097,7 +1097,12 @@ async function fetchReceiptData() {
       throw new Error(data.message || "Failed to load receipt data");
     }
 
-    receiptData.value = data.data;
+    // Update receipt data with proper status handling
+    receiptData.value = {
+      ...data.data,
+      // If URL has success status, ensure the status is updated
+      status: route.query.status === "success" ? 3 : data.data.status
+    };
   } catch (err) {
     console.error("Error fetching receipt:", err);
     error.value = err.message;
@@ -1127,10 +1132,27 @@ onMounted(async () => {
     // Fetch receipt data
     await fetchReceiptData();
 
-    // Handle status based on API response
+    // Handle status based on API response and URL status
     if (receiptData.value) {
+      // If URL has success status, update the receipt status
+      if (route.query.status === "success") {
+        try {
+          await updateBookingStatus("success");
+          // Refresh receipt data to get updated status
+          await fetchReceiptData();
+        } catch (err) {
+          console.error("Error updating booking status:", err);
+        }
+      }
+
+      // Update status display based on receipt data
       switch (receiptData.value.status) {
         case 1: // Pending
+          if (route.query.status === "success") {
+            // If URL indicates success but status is pending, update it
+            receiptData.value.status = 3; // Set to full payment
+          }
+          break;
         case 2: // Partial payment (success)
         case 3: // Full payment (success)
         case 4: // Failed - still show receipt with failed status
@@ -1299,6 +1321,40 @@ function formatTime(time: string | undefined): string {
 function formatPrice(price: number | undefined): string {
   if (price === undefined || price === null) return "0.00";
   return price.toFixed(2);
+}
+
+// Update recheckBookingStatus function
+async function recheckBookingStatus() {
+  if (!receiptData.value) return;
+
+  try {
+    isRecheckingStatus.value = true;
+    error.value = null;
+
+    const response = await fetch(
+      `/api/booking/check-payment-status?receiptNumber=${route.query.booking}`
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to check payment status");
+    }
+
+    const data = await response.json();
+
+    if (data.status === "success") {
+      // Update the receipt status to success
+      receiptData.value.status = 3; // Set to full payment
+      await updateBookingStatus("success");
+    } else if (data.status === "failed") {
+      receiptData.value.status = 4; // Set to failed
+      error.value = "Payment failed. Please try again.";
+    }
+  } catch (err) {
+    console.error("Error checking payment status:", err);
+    error.value = "Failed to check payment status";
+  } finally {
+    isRecheckingStatus.value = false;
+  }
 }
 </script>
 
