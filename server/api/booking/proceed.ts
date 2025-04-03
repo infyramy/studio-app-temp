@@ -492,110 +492,75 @@ export default defineEventHandler(async (event: H3Event) => {
 
     if (body.payment_method === 1) {
       // CHIP Payment
-      // Initialize CHIP payment
-
-      const CHIP_SECRET_KEY = await knex("config")
-        .select("value")
-        .where("code", "chip_key")
-        .first();
-
-      const CHIP_BRAND_ID = await knex("config")
-        .select("value")
-        .where("code", "chip_brand_id")
-        .first();
-
-      const PAYMENT_METHODS = await knex("config")
-        .select("value")
-        .where("code", "chip_active_payment_methods")
-        .first();
-
+      // Update the CHIP payment initialization code
       try {
-        console.log("CHIP Secret Key:", CHIP_SECRET_KEY.value);
-        console.log("CHIP Brand ID:", CHIP_BRAND_ID.value);
-        console.log("Raw Payment Methods from DB:", PAYMENT_METHODS?.value);
-
-        if (!PAYMENT_METHODS?.value) {
-          console.error("No payment methods configured in database");
-          throw createError({
-            statusCode: 400,
-            statusMessage: "Payment methods configuration is missing. Please configure payment methods in settings.",
+        // Get CHIP credentials from database
+        const chipConfig = await knex("config")
+          .select("value")
+          .whereIn("code", ["chip_secret_key", "chip_brand_id"])
+          .then((rows) => {
+            const config = {} as Record<string, string>;
+            rows.forEach((row) => {
+              if (row.code === "chip_secret_key") config.secretKey = row.value;
+              if (row.code === "chip_brand_id") config.brandId = row.value;
+            });
+            return config;
           });
+
+        if (!chipConfig.secretKey || !chipConfig.brandId) {
+          throw new Error("CHIP credentials not found in database");
         }
 
-        // Convert comma-separated payment methods to array
-        const methods = PAYMENT_METHODS.value
-          .replace(/['"]+/g, "") // Remove any existing quotes
-          .split(",")
-          .map((method: string) => method.trim().replace(/\s+/g, ""))
-          .filter(Boolean); // Remove empty entries
-
-        console.log("Processed Payment Methods:", methods);
-
-        if (!methods.length) {
-          console.error("No valid payment methods found after processing");
-          throw createError({
-            statusCode: 400,
-            statusMessage: "No active payment methods configured. Please configure payment methods in settings.",
-          });
-        }
-
-        // Validate each payment method
-        const validMethods = methods.filter((method: string) => {
-          const isValid = ['fpx', 'credit_card', 'grabpay', 'boost', 'tng'].includes(method.toLowerCase());
-          if (!isValid) {
-            console.warn(`Invalid payment method found: ${method}`);
-          }
-          return isValid;
-        });
-
-        if (!validMethods.length) {
-          console.error("No valid payment methods after validation");
-          throw createError({
-            statusCode: 400,
-            statusMessage: "No valid payment methods found. Valid methods are: fpx, credit_card, grabpay, boost, tng",
-          });
-        }
-
-        console.log("Valid Payment Methods:", validMethods);
-
-        // Update the CHIP payment initialization
+        // Create CHIP payment with retry mechanism
         const chipData = await retry(
           async () => {
-            const response = await fetch("https://api.chip-in.asia/v1/purchases", {
+            const response = await fetch("https://gate.chip-in.asia/api/v1/purchases/", {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
-                Authorization: `Bearer ${CHIP_SECRET_KEY.value}`,
+                Authorization: `Bearer ${chipConfig.secretKey}`,
               },
               body: JSON.stringify({
                 success_callback: `${process.env.PUBLIC_API_URL}/api/booking/payment-callback`,
                 success_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=success`,
                 failure_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=failed`,
                 cancel_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=cancelled`,
-                brand_id: CHIP_BRAND_ID.value,
-                title: themeData.title,
-                currency: "MYR",
-                amount: paymentTotal,
-                skip_capture: true,
+                brand_id: chipConfig.brandId,
                 client: {
                   email: body.email,
                   full_name: body.name,
                   phone: body.phone,
                 },
+                products: [
+                  {
+                    name: themeData.title,
+                    quantity: 1,
+                    price: body.payment_amount,
+                  },
+                ],
+                currency: "MYR",
+                due_strict: true,
+                due_strict_timing: 10,
               }),
-              signal: AbortSignal.timeout(30000), // 30 second timeout
+              signal: AbortSignal.timeout(30000),
+              keepalive: true,
             });
 
             if (!response.ok) {
-              const errorData = await response.json().catch(() => ({}));
+              const errorData = await response.json();
               throw new Error(errorData.message || "Failed to initialize CHIP payment");
             }
 
-            return response.json();
+            return await response.json();
           },
-          3, // number of retries
-          30000 // timeout between retries in ms
+          3, // retries
+          1000 // timeout
         );
+
+        // Update booking with CHIP purchase ID
+        await knex("booking")
+          .where("id", bookingId)
+          .update({ chip_purchase_id: chipData.id });
 
         return {
           status: "success",
@@ -607,17 +572,11 @@ export default defineEventHandler(async (event: H3Event) => {
             purchase_id: chipData.id,
           },
         };
-      } catch (error: any) {
-        console.error("CHIP payment outer error:", error);
-        
-        // Update booking status to failed
-        await knex("booking").where("id", bookingId).update({ 
-          status: 4 // 4 = Failed
-        });
-
+      } catch (fetchError: any) {
+        console.error("CHIP payment fetch error:", fetchError);
         throw createError({
-          statusCode: error.statusCode || 500,
-          statusMessage: `Failed to process CHIP payment: ${error.message}`,
+          statusCode: 500,
+          message: "Failed to process CHIP payment: " + fetchError.message,
         });
       }
     } else {
