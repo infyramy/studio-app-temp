@@ -87,10 +87,30 @@ function isValidDate(dateStr: string): boolean {
   return date >= today;
 }
 
-// Validate time format (HH:mm)
+// Validate time format (HH:mm or HH:mm:ss)
 function isValidTime(timeStr: string): boolean {
-  const regex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
-  return regex.test(timeStr);
+  // First try HH:mm format
+  const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
+  if (timeRegex.test(timeStr)) return true;
+
+  // Then try HH:mm:ss format
+  const timeWithSecondsRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/;
+  if (timeWithSecondsRegex.test(timeStr)) {
+    // If it has seconds, strip them for consistency
+    return true;
+  }
+
+  return false;
+}
+
+// Add a helper function to normalize time format
+function normalizeTime(timeStr: string): string {
+  // If time includes seconds, strip them
+  if (timeStr.includes(':')) {
+    const parts = timeStr.split(':');
+    return `${parts[0]}:${parts[1]}`;
+  }
+  return timeStr;
 }
 
 // Generate receipt number
@@ -213,6 +233,18 @@ export default defineEventHandler(async (event: H3Event) => {
       });
     }
 
+    // Normalize and validate time
+    const normalizedTime = normalizeTime(body.time);
+    if (!isValidTime(normalizedTime)) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Invalid time format. Expected HH:mm or HH:mm:ss",
+      });
+    }
+
+    // Update the time in the request body
+    body.time = normalizedTime;
+
     // Validate email and phone
     if (!isValidEmail(body.email)) {
       throw createError({
@@ -278,6 +310,7 @@ export default defineEventHandler(async (event: H3Event) => {
     if (themeData.price_type === 1) {
       // Fixed price
       basePrice = themeData.price;
+      console.log("Using fixed price:", basePrice);
     } else if (themeData.price_type === 2) {
       // Pax-based pricing
       const applicablePaxPrice = paxPrices.find(
@@ -292,6 +325,11 @@ export default defineEventHandler(async (event: H3Event) => {
         });
       }
       basePrice = applicablePaxPrice.price;
+      console.log("Using pax-based price:", {
+        basePrice,
+        numberOfPax: body.number_of_pax,
+        applicablePaxPrice
+      });
     }
 
     // Get configuration values
@@ -299,6 +337,11 @@ export default defineEventHandler(async (event: H3Event) => {
       knex("config").select("value").where("code", "charge_per_pax").first(),
       knex("config").select("value").where("code", "max_free_pax").first(),
     ]);
+
+    console.log("Configuration values:", {
+      chargePerPax: chargePerPax?.value,
+      maxFreePax: maxFreePax?.value
+    });
 
     // Check for date-specific price adjustment
     let datePriceAdjustment = 0;
@@ -314,9 +357,14 @@ export default defineEventHandler(async (event: H3Event) => {
         if (applicableDatePrice.price_type === 1) {
           // Fixed amount adjustment
           datePriceAdjustment = applicableDatePrice.amount;
+          console.log("Using fixed date adjustment:", datePriceAdjustment);
         } else if (applicableDatePrice.price_type === 2) {
           // Percentage adjustment
           datePriceAdjustment = (basePrice * applicableDatePrice.amount) / 100;
+          console.log("Using percentage date adjustment:", {
+            percentage: applicableDatePrice.amount,
+            adjustment: datePriceAdjustment
+          });
         }
       }
     }
@@ -325,6 +373,7 @@ export default defineEventHandler(async (event: H3Event) => {
     let addons = [];
     let addonsTotal = 0;
     if (body.add_ons?.length > 0) {
+      console.log("Processing add-ons:", body.add_ons);
       for (const addon of body.add_ons) {
         const addonData = await knex("addon").where("id", addon.id).first();
         if (!addonData) {
@@ -340,6 +389,7 @@ export default defineEventHandler(async (event: H3Event) => {
         });
         addonsTotal += addonData.price * addon.quantity;
       }
+      console.log("Add-ons total:", addonsTotal);
     }
 
     // Calculate extra pax charges
@@ -348,6 +398,12 @@ export default defineEventHandler(async (event: H3Event) => {
       extraPaxCharge =
         (body.number_of_pax - parseInt(maxFreePax.value)) *
         parseInt(chargePerPax.value);
+      console.log("Extra pax charge:", {
+        numberOfPax: body.number_of_pax,
+        maxFreePax: parseInt(maxFreePax.value),
+        chargePerPax: parseInt(chargePerPax.value),
+        extraPaxCharge
+      });
     }
 
     // Calculate subtotal before adjustments
@@ -357,11 +413,30 @@ export default defineEventHandler(async (event: H3Event) => {
     const paymentTotal =
       subtotalBeforeAdjustments + datePriceAdjustment + extraPaxCharge;
 
+    // Add detailed logging for payment calculation
+    console.log("Payment Calculation Details:", {
+      basePrice,
+      addonsTotal,
+      datePriceAdjustment,
+      extraPaxCharge,
+      subtotalBeforeAdjustments,
+      paymentTotal,
+      receivedAmount: body.payment_amount,
+      difference: Math.abs(body.payment_amount - paymentTotal),
+      paymentType: body.payment_type,
+      paymentMethod: body.payment_method
+    });
+
     // Validate payment amount before proceeding
     if (Math.abs(body.payment_amount - paymentTotal) > 0.01) {
+      console.error("Payment Amount Mismatch:", {
+        expected: paymentTotal,
+        received: body.payment_amount,
+        difference: Math.abs(body.payment_amount - paymentTotal)
+      });
       throw createError({
         statusCode: 400,
-        statusMessage: "Payment amount mismatch",
+        statusMessage: `Payment amount mismatch. Expected: ${paymentTotal}, Received: ${body.payment_amount}`,
       });
     }
 
