@@ -554,7 +554,6 @@ export default defineEventHandler(async (event: H3Event) => {
           session_status: 1, // Pending
           created_date: new Date(),
           referral: updatedReferral,
-          payment_initiated_at: new Date(),
           chip_purchase_id: chipData.id, // Store CHIP purchase ID
         });
 
