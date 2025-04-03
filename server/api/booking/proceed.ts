@@ -461,114 +461,153 @@ export default defineEventHandler(async (event: H3Event) => {
       // CHIP Payment
       try {
         // Get CHIP credentials from database
-        const chipConfig = await knex("config")
-          .select("code", "value")
-          .whereIn("code", ["chip_key", "chip_brand_id"])
-          .then((rows) => {
-            const config = {} as Record<string, string>;
-            rows.forEach((row) => {
-              if (row.code === "chip_key") config.secretKey = row.value;
-              if (row.code === "chip_brand_id") config.brandId = row.value;
-            });
-            return config;
-          });
+        const CHIP_SECRET_KEY = await knex("config")
+          .select("value")
+          .where("code", "chip_key")
+          .first();
 
-        console.log("CHIP Config:", chipConfig);
+        const CHIP_BRAND_ID = await knex("config")
+          .select("value")
+          .where("code", "chip_brand_id")
+          .first();
 
-        if (!chipConfig.secretKey || !chipConfig.brandId) {
+        console.log("CHIP Secret Key:", CHIP_SECRET_KEY?.value);
+        console.log("CHIP Brand ID:", CHIP_BRAND_ID?.value);
+
+        if (!CHIP_SECRET_KEY?.value || !CHIP_BRAND_ID?.value) {
           throw new Error("CHIP credentials not found in database");
         }
 
         // Create CHIP payment with retry mechanism
         const chipData = await retry(
           async () => {
-            const response = await fetch("https://gate.chip-in.asia/api/v1/purchases/", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${chipConfig.secretKey}`,
-              },
-              body: JSON.stringify({
-                success_callback: `${process.env.PUBLIC_API_URL}/api/booking/payment-callback`,
-                success_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=success`,
-                failure_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=failed`,
-                cancel_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=cancelled`,
-                brand_id: chipConfig.brandId,
-                client: {
-                  email: body.email,
-                  full_name: body.name,
-                  phone: body.phone,
-                },
+            // Create the request body
+            const chipRequestBody = {
+              brand_id: CHIP_BRAND_ID.value,
+              reference: `BOOKING-${receiptNumber}`,
+              platform: "web",
+              purchase: {
                 products: [
                   {
-                    name: themeData.title,
-                    quantity: 1,
-                    price: body.payment_amount,
+                    name: `${themeData.title}${body.payment_type === 2 ? " (Deposit)" : ""}`,
+                    price: body.payment_amount * 100, // Convert to cents without rounding
                   },
                 ],
                 currency: "MYR",
-                due_strict: true,
-                due_strict_timing: 10,
-              }),
-              signal: AbortSignal.timeout(30000),
-              keepalive: true,
-            });
+              },
+              client: {
+                full_name: body.name,
+                email: body.email,
+                phone: body.phone,
+              },
+              success_callback: `${process.env.PUBLIC_API_URL}/api/booking/payment-callback`,
+              success_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=success`,
+              failure_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=failed`,
+              cancel_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=cancelled`,
+              send_receipt: true,
+              skip_capture: false,
+            };
 
-            if (!response.ok) {
-              const errorData = await response.json();
-              throw new Error(errorData.message || "Failed to initialize CHIP payment");
+            console.log("CHIP Request Body:", JSON.stringify(chipRequestBody, null, 2));
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+            try {
+              const response = await fetch("https://gate.chip-in.asia/api/v1/purchases/", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${CHIP_SECRET_KEY.value}`,
+                },
+                body: JSON.stringify(chipRequestBody),
+                signal: controller.signal,
+              });
+
+              clearTimeout(timeoutId);
+
+              console.log("CHIP Response Status:", response.status);
+              console.log("CHIP Response Status Text:", response.statusText);
+              
+              // Try to get response data even if the response is not OK
+              let responseData;
+              try {
+                responseData = await response.json();
+                console.log("CHIP Response Data:", JSON.stringify(responseData, null, 2));
+              } catch (jsonError) {
+                console.error("Failed to parse CHIP response as JSON:", jsonError);
+                throw new Error("Failed to parse CHIP response");
+              }
+
+              if (!response.ok) {
+                throw new Error(responseData?.message || `HTTP error: ${response.status}`);
+              }
+
+              return responseData;
+            } catch (err) {
+              clearTimeout(timeoutId);
+              throw err;
             }
-
-            return await response.json();
           },
           3, // retries
           1000 // timeout
         );
 
-        // Create the booking after successful CHIP initialization
-        const [bookingId] = await knex("booking").insert({
-          user_fullname: body.name,
-          user_email: body.email,
-          user_phoneno: body.phone,
-          user_source: body.source,
-          session_date: body.date,
-          session_time: body.time,
-          theme: body.theme,
-          theme_price: basePrice,
-          theme_surcharge_type: dateSpecificPrices?.[0]?.price_type || null,
-          theme_surcharge_amount: datePriceAdjustment,
-          number_of_pax: body.number_of_pax,
-          number_of_extra_pax:
-            body.number_of_pax > parseInt(maxFreePax.value)
-              ? body.number_of_pax - parseInt(maxFreePax.value)
-              : 0,
-          addon: addons.length > 0 ? JSON.stringify(addons) : null,
-          frame_status: addons.length > 0 ? 1 : 0,
-          payment_ref_number: receiptNumber,
-          payment_type: body.payment_type,
-          payment_method: body.payment_method,
-          payment_deposit: themeData.deposit,
-          payment_amount: body.payment_method === 1 ? body.payment_amount : 0,
-          payment_addon_total: addonsTotal,
-          payment_total: paymentTotal,
-          payment_extra_pax: extraPaxCharge,
-          status: 1, // Pending
-          session_status: 1, // Pending
-          created_date: new Date(),
-          referral: updatedReferral,
-          chip_purchase_id: chipData.id, // Store CHIP purchase ID
-        });
+        // Start a database transaction for booking creation
+        const trx = await knex.transaction();
+        try {
+          // Create the booking after successful CHIP initialization
+          const [bookingId] = await trx("booking").insert({
+            user_fullname: body.name,
+            user_email: body.email,
+            user_phoneno: body.phone,
+            user_source: body.source,
+            session_date: body.date,
+            session_time: body.time,
+            theme: body.theme,
+            theme_price: basePrice,
+            theme_surcharge_type: dateSpecificPrices?.[0]?.price_type || null,
+            theme_surcharge_amount: datePriceAdjustment,
+            number_of_pax: body.number_of_pax,
+            number_of_extra_pax:
+              body.number_of_pax > parseInt(maxFreePax.value)
+                ? body.number_of_pax - parseInt(maxFreePax.value)
+                : 0,
+            addon: addons.length > 0 ? JSON.stringify(addons) : null,
+            frame_status: addons.length > 0 ? 1 : 0,
+            payment_ref_number: receiptNumber,
+            payment_type: body.payment_type,
+            payment_method: body.payment_method,
+            payment_deposit: themeData.deposit,
+            payment_amount: body.payment_method === 1 ? body.payment_amount : 0,
+            payment_addon_total: addonsTotal,
+            payment_total: paymentTotal,
+            payment_extra_pax: extraPaxCharge,
+            status: 1, // Pending
+            session_status: 1, // Pending
+            created_date: new Date(),
+            referral: updatedReferral,
+            chip_purchase_id: chipData.id, // Store CHIP purchase ID
+          });
 
-        return {
-          status: "success",
-          message: "Booking created and payment initialized successfully",
-          data: {
-            booking_id: bookingId,
-            receipt_number: receiptNumber,
-            checkout_url: chipData.checkout_url,
-            purchase_id: chipData.id,
-          },
-        };
+          // Commit the transaction
+          await trx.commit();
+
+          return {
+            status: "success",
+            message: "Booking created and payment initialized successfully",
+            data: {
+              booking_id: bookingId,
+              receipt_number: receiptNumber,
+              checkout_url: chipData.checkout_url,
+              purchase_id: chipData.id,
+            },
+          };
+        } catch (trxError) {
+          // Rollback the transaction if there's an error
+          await trx.rollback();
+          throw trxError;
+        }
       } catch (fetchError: any) {
         console.error("CHIP payment fetch error:", fetchError);
         throw createError({
