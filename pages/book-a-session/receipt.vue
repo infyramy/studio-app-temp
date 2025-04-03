@@ -1196,6 +1196,58 @@ const showPaymentActions = computed(() => {
   // Show payment actions only for pending or failed status
   return [1, 4].includes(receiptData.value.status);
 });
+
+// Add date formatting functions
+function formatDatetime(datetime: string | undefined): string {
+  if (!datetime) return "N/A";
+  try {
+    const date = new Date(datetime);
+    return date.toLocaleString("en-MY", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch (err) {
+    console.error("Error formatting datetime:", err);
+    return "N/A";
+  }
+}
+
+function formatDate(date: string | undefined): string {
+  if (!date) return "N/A";
+  try {
+    const dateObj = new Date(date);
+    return dateObj.toLocaleDateString("en-MY", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  } catch (err) {
+    console.error("Error formatting date:", err);
+    return "N/A";
+  }
+}
+
+function formatTime(time: string | undefined): string {
+  if (!time) return "N/A";
+  try {
+    // Handle time with or without seconds
+    const timeParts = time.split(":");
+    const hours = timeParts[0];
+    const minutes = timeParts[1];
+    return `${hours}:${minutes}`;
+  } catch (err) {
+    console.error("Error formatting time:", err);
+    return "N/A";
+  }
+}
+
+function formatPrice(price: number | undefined): string {
+  if (price === undefined || price === null) return "0.00";
+  return price.toFixed(2);
+}
 </script>
 
 <style>

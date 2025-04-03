@@ -9143,20 +9143,14 @@ Failed to initialize receipt generation
 
 Retry Loading
 
-when test mode status success on chip, when return got those error
+when test mode status success on chip, when return got those error. please recheck because supposedly before this can get it worked butthis time is broke down wwhen reutrn. no need to change too much, just fix the core problem
 
 ---
 
 _**Assistant**_
 
-I see the issue. The error occurs when returning from a successful CHIP payment. There are two main problems:
+I see the issue. The problem is occurring after the CHIP payment success callback, where the receipt page is failing to load. Let me help fix this by checking the receipt data handling:
 
-1. Service Worker (SW) precaching issue
-2. Missing `fetchReceiptData` function in the receipt component
-
-Let's fix these issues:
-
-1. First, let's check the receipt component:
 
 
 ---
@@ -9164,35 +9158,35 @@ Let's fix these issues:
 _****_
 
 <details>
-            <summary>Searched codebase "receipt component or page that handles receipt data" • **25** results</summary>
+            <summary>Searched codebase "fetchReceiptData receipt page" • **25** results</summary>
         
 | File | Lines |
 |------|-------|
+| `pages/book-a-session/receipt-qr/index.vue` | L979-1062 |
 | `pages/book-a-session/receipt.vue` | L680-755 |
+| `pages/book-a-session/receipt-qr/index.vue` | L39-80 |
+| `server/api/booking/receipt-detail.ts` | L1-61 |
+| `pages/book-a-session/receipt.vue` | L39-79 |
 | `pages/book-a-session/receipt.vue` | L1025-1100 |
 | `pages/book-a-session/receipt.vue` | L1100-1176 |
-| `pages/book-a-session/receipt-qr/index.vue` | L979-1062 |
-| `pages/book-a-session/receipt.vue` | L39-79 |
-| `pages/book-a-session/receipt.vue` | L259-304 |
-| `pages/book-a-session/receipt.vue` | L357-382 |
-| `pages/book-a-session/receipt-qr/index.vue` | L39-80 |
-| `pages/book-a-session/receipt.vue` | L500-544 |
-| `pages/book-a-session/receipt.vue` | L581-625 |
-| `pages/book-a-session/receipt.vue` | L457-500 |
-| `pages/book-a-session/receipt.vue` | L1-39 |
-| `pages/book-a-session/receipt.vue` | L198-237 |
-| `pages/dashboard/bookings.vue` | L1760-1815 |
-| `pages/book-a-session/receipt.vue` | L304-357 |
-| `pages/book-a-session/receipt.vue` | L544-581 |
-| `server/api/booking/send-receipt.ts` | L66-123 |
-| `pages/dashboard/bookings.vue` | L1725-1760 |
 | `pages/book-a-session/receipt-qr/index.vue` | L762-792 |
-| `pages/book-a-session/receipt.vue` | L237-259 |
 | `pages/book-a-session/failed-payment.vue` | L229-298 |
+| `pages/book-a-session/receipt.vue` | L259-304 |
 | `server/api/booking/send-receipt.ts` | L1-15 |
-| `pages/book-a-session/receipt.vue` | L124-147 |
-| `pages/book-a-session/receipt.vue` | L382-413 |
-| `pages/book-a-session/receipt-qr/index.vue` | L857-914 |
+| `pages/book-a-session/receipt.vue` | L1-39 |
+| `pages/book-a-session/receipt.vue` | L357-382 |
+| `pages/book-a-session/receipt.vue` | L304-357 |
+| `server/api/booking/send-receipt.ts` | L66-123 |
+| `pages/book-a-session/receipt.vue` | L500-544 |
+| `pages/book-a-session/receipt.vue` | L457-500 |
+| `pages/dashboard/bookings.vue` | L1760-1815 |
+| `pages/book-a-session/receipt-qr/index.vue` | L792-857 |
+| `pages/book-a-session/receipt.vue` | L648-680 |
+| `server/api/booking/proceed.ts` | L108-117 |
+| `pages/book-a-session/receipt.vue` | L198-237 |
+| `server/api/booking/send-receipt.ts` | L15-66 |
+| `pages/book-a-session/receipt.vue` | L755-815 |
+| `pages/book-a-session/receipt.vue` | L971-1025 |
 
 </details>
 
@@ -9200,20 +9194,186 @@ _****_
 
 _****_
 
-I see the issue. The receipt component is missing the `fetchReceiptData` function implementation. Let me add it:
+I see the issue. The problem is in the receipt page initialization. Let me fix this by updating the receipt page to properly handle the receipt data fetching:
 
 
 ---
 
 _****_
 
-Cancelled
+```diff
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
++ 
++ // Add fetchReceiptData function
++ async function fetchReceiptData() {
++   try {
++     isLoading.value = true;
++     error.value = null;
++ 
++     if (!route.query.booking) {
++       throw new Error("No booking reference provided");
++     }
++ 
++     const response = await fetch(
++       `/api/booking/receipt-detail?receiptNumber=${route.query.booking}`
++     );
++ 
++     if (!response.ok) {
++       throw new Error("Failed to fetch receipt details");
++     }
++ 
++     const data = await response.json();
++ 
++     if (data.status !== "success" || !data.data) {
++       throw new Error(data.message || "Failed to load receipt data");
++     }
++ 
++     receiptData.value = data.data;
++   } catch (err) {
++     console.error("Error fetching receipt:", err);
++     error.value = err.message;
++   } finally {
++     isLoading.value = false;
++   }
++ }
+  
+  // Update the onMounted hook
+```
 
 ---
 
 _****_
 
+I've added the missing `fetchReceiptData` function to the receipt page. This function is responsible for:
 
+1. Fetching the receipt data from the API
+2. Handling loading states
+3. Error handling
+4. Setting the receipt data in the component state
+
+The error you were seeing ("ReferenceError: fetchReceiptData is not defined") should now be resolved because:
+
+1. The `fetchReceiptData` function is now properly defined
+2. It's being called in the `onMounted` hook
+3. It's also available for the retry button click handler
+
+The function will:
+1. Check if there's a booking reference in the URL
+2. Make a request to `/api/booking/receipt-detail` with the booking reference
+3. Handle the response and any potential errors
+4. Update the component state with the receipt data
+
+Could you try the payment process again? The receipt page should now load properly after a successful CHIP payment. If you still encounter any issues, please let me know and I'll help you troubleshoot further.
+
+---
+
+_**User**_
+
+Unchecked runtime.lastError: A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received
+D_RCM4gB.js:14 TypeError: o.formatDatetime is not a function
+    at Proxy.<anonymous> (CCTr_WIB.js:2:12435)
+    at As (D_RCM4gB.js:15:30410)
+    at tl.N [as fn] (D_RCM4gB.js:15:22245)
+    at tl.run (D_RCM4gB.js:10:1808)
+    at tl.runIfDirty (D_RCM4gB.js:10:2118)
+    at lr (D_RCM4gB.js:14:46)
+    at El (D_RCM4gB.js:14:1796)
+
+still error, now blank page. 
+
+---
+
+_**Assistant**_
+
+I see the issue. The error is occurring because the `formatDatetime` function is missing. Let me add the necessary date formatting functions to the receipt page:
+
+
+---
+
+_****_
+
+```diff
+    return [1, 4].includes(receiptData.value.status);
+  });
++ 
++ // Add date formatting functions
++ function formatDatetime(datetime: string | undefined): string {
++   if (!datetime) return "N/A";
++   try {
++     const date = new Date(datetime);
++     return date.toLocaleString("en-MY", {
++       year: "numeric",
++       month: "long",
++       day: "numeric",
++       hour: "2-digit",
++       minute: "2-digit",
++     });
++   } catch (err) {
++     console.error("Error formatting datetime:", err);
++     return "N/A";
++   }
++ }
++ 
++ function formatDate(date: string | undefined): string {
++   if (!date) return "N/A";
++   try {
++     const dateObj = new Date(date);
++     return dateObj.toLocaleDateString("en-MY", {
++       year: "numeric",
++       month: "long",
++       day: "numeric",
++     });
++   } catch (err) {
++     console.error("Error formatting date:", err);
++     return "N/A";
++   }
++ }
++ 
++ function formatTime(time: string | undefined): string {
++   if (!time) return "N/A";
++   try {
++     // Handle time with or without seconds
++     const timeParts = time.split(":");
++     const hours = timeParts[0];
++     const minutes = timeParts[1];
++     return `${hours}:${minutes}`;
++   } catch (err) {
++     console.error("Error formatting time:", err);
++     return "N/A";
++   }
++ }
++ 
++ function formatPrice(price: number | undefined): string {
++   if (price === undefined || price === null) return "0.00";
++   return price.toFixed(2);
++ }
+  </script>
+  
+```
+
+---
+
+_****_
+
+I've added the missing date formatting functions that were causing the error:
+
+1. `formatDatetime`: Formats a datetime string into a localized date and time string
+2. `formatDate`: Formats a date string into a localized date string
+3. `formatTime`: Formats a time string, handling both HH:mm and HH:mm:ss formats
+4. `formatPrice`: Formats a price number with 2 decimal places
+
+These functions are used throughout the template to format:
+- Receipt creation date
+- Session date
+- Session time
+- Price amounts
+
+The functions include error handling and fallback values to prevent crashes if the input data is invalid or missing.
+
+Try refreshing the receipt page now. The error about `formatDatetime` not being a function should be resolved, and you should see the properly formatted receipt data.
+
+If you're still seeing a blank page, please check the browser console for any other errors and let me know what you see. Also, could you confirm if the receipt data is being loaded correctly by checking the network tab in your browser's developer tools for the `/api/booking/receipt-detail` request?
 
 ---
 
