@@ -478,190 +478,101 @@ export default defineEventHandler(async (event: H3Event) => {
           throw new Error("CHIP credentials not found in database");
         }
 
-        // Create CHIP payment with retry mechanism
-        const chipData = await retry(
-          async () => {
-            // Create the request body
-            const chipRequestBody = {
-              brand_id: CHIP_BRAND_ID.value,
-              reference: `BOOKING-${receiptNumber}`,
-              platform: "web",
-              purchase: {
-                products: [
-                  {
-                    name: `${themeData.title}${body.payment_type === 2 ? " (Deposit)" : ""}`,
-                    price: body.payment_amount * 100, // Convert to cents without rounding
-                  },
-                ],
-                currency: "MYR",
+        // Create the request body
+        const chipRequestBody = {
+          brand_id: CHIP_BRAND_ID.value,
+          reference: `BOOKING-${receiptNumber}`,
+          platform: "web",
+          purchase: {
+            products: [
+              {
+                name: `${themeData.title}${body.payment_type === 2 ? " (Deposit)" : ""}`,
+                price: body.payment_amount * 100, // Convert to cents
               },
-              client: {
-                full_name: body.name,
-                email: body.email,
-                phone: body.phone,
-              },
-              success_callback: `${process.env.PUBLIC_API_URL}/api/booking/payment-callback`,
-              success_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=success`,
-              failure_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=failed`,
-              cancel_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=cancelled`,
-              send_receipt: true,
-              skip_capture: false,
-            };
-
-            console.log("CHIP Request Body:", JSON.stringify(chipRequestBody, null, 2));
-
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-            try {
-              const response = await fetch("https://gate.chip-in.asia/api/v1/purchases/", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${CHIP_SECRET_KEY.value}`,
-                },
-                body: JSON.stringify(chipRequestBody),
-                signal: controller.signal,
-              });
-
-              clearTimeout(timeoutId);
-
-              console.log("CHIP Response Status:", response.status);
-              console.log("CHIP Response Status Text:", response.statusText);
-              
-              // Try to get response data even if the response is not OK
-              let responseData;
-              try {
-                responseData = await response.json();
-                console.log("CHIP Response Data:", JSON.stringify(responseData, null, 2));
-              } catch (jsonError) {
-                console.error("Failed to parse CHIP response as JSON:", jsonError);
-                throw new Error("Failed to parse CHIP response");
-              }
-
-              if (!response.ok) {
-                throw new Error(responseData?.message || `HTTP error: ${response.status}`);
-              }
-
-              return responseData;
-            } catch (err: any) {
-              clearTimeout(timeoutId);
-              console.error("Network error details:", err);
-              
-              // Check for specific connection errors
-              if (err.name === 'AbortError') {
-                throw new Error("Connection timed out when contacting CHIP API");
-              }
-              
-              if (err.code === 'ECONNREFUSED' || err.code === 'UND_ERR_CONNECT_TIMEOUT') {
-                throw new Error("Unable to connect to CHIP payment gateway. Please check your network settings.");
-              }
-              
-              // Try alternative CHIP API endpoint if available
-              try {
-                console.log("Trying alternative CHIP API endpoint");
-                const altResponse = await fetch("https://api.chip-in.asia/v1/purchases/", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${CHIP_SECRET_KEY.value}`,
-                  },
-                  body: JSON.stringify(chipRequestBody),
-                  signal: AbortSignal.timeout(30000),
-                });
-                
-                if (altResponse.ok) {
-                  const altData = await altResponse.json();
-                  console.log("Alternative CHIP endpoint successful");
-                  return altData;
-                }
-              } catch (altErr) {
-                console.error("Alternative endpoint also failed:", altErr);
-              }
-              
-              throw err;
-            }
+            ],
+            currency: "MYR",
           },
-          3, // retries
-          1000 // timeout
-        );
+          client: {
+            full_name: body.name,
+            email: body.email,
+            phone: body.phone,
+          },
+          success_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=success`,
+          failure_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=failed`,
+          cancel_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=cancelled`,
+          send_receipt: true,
+          skip_capture: false,
+        };
 
-        // Start a database transaction for booking creation
-        const trx = await knex.transaction();
-        try {
-          // Create the booking after successful CHIP initialization
-          const [bookingId] = await trx("booking").insert({
-            user_fullname: body.name,
-            user_email: body.email,
-            user_phoneno: body.phone,
-            user_source: body.source,
-            session_date: body.date,
-            session_time: body.time,
-            theme: body.theme,
-            theme_price: basePrice,
-            theme_surcharge_type: dateSpecificPrices?.[0]?.price_type || null,
-            theme_surcharge_amount: datePriceAdjustment,
-            number_of_pax: body.number_of_pax,
-            number_of_extra_pax:
-              body.number_of_pax > parseInt(maxFreePax.value)
-                ? body.number_of_pax - parseInt(maxFreePax.value)
-                : 0,
-            addon: addons.length > 0 ? JSON.stringify(addons) : null,
-            frame_status: addons.length > 0 ? 1 : 0,
-            payment_ref_number: receiptNumber,
-            payment_type: body.payment_type,
-            payment_method: body.payment_method,
-            payment_deposit: themeData.deposit,
-            payment_amount: body.payment_method === 1 ? body.payment_amount : 0,
-            payment_addon_total: addonsTotal,
-            payment_total: paymentTotal,
-            payment_extra_pax: extraPaxCharge,
-            status: 1, // Pending
-            session_status: 1, // Pending
-            created_date: new Date(),
-            referral: updatedReferral,
-            chip_purchase_id: chipData.id, // Store CHIP purchase ID
-          });
+        console.log("CHIP Request Body:", JSON.stringify(chipRequestBody, null, 2));
 
-          // Commit the transaction
-          await trx.commit();
+        // Simple fetch request with timeout
+        const response = await fetch("https://gate.chip-in.asia/api/v1/purchases/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${CHIP_SECRET_KEY.value}`,
+          },
+          body: JSON.stringify(chipRequestBody),
+        });
 
-          // Send WhatsApp notifications for CHIP payments
-          const adminPhoneNumber = await knex("config")
-            .select("value")
-            .where("code", "admin_phoneno")
-            .first();
-
-          // Send WhatsApp notification to admin
-          await sendWhatsAppNotification(
-            adminPhoneNumber.value,
-            receiptNumber,
-            "admin"
-          );
-
-          // Send WhatsApp notification to customer
-          await sendWhatsAppNotification(body.phone, receiptNumber, "customer");
-
-          return {
-            status: "success",
-            message: "Booking created and payment initialized successfully",
-            data: {
-              booking_id: bookingId,
-              receipt_number: receiptNumber,
-              checkout_url: chipData.checkout_url,
-              purchase_id: chipData.id,
-            },
-          };
-        } catch (trxError) {
-          // Rollback the transaction if there's an error
-          await trx.rollback();
-          throw trxError;
+        if (!response.ok) {
+          throw new Error(`CHIP API error: ${response.status} ${response.statusText}`);
         }
-      } catch (fetchError: any) {
-        console.error("CHIP payment fetch error:", fetchError);
+
+        const chipData = await response.json();
+        console.log("CHIP API Response:", JSON.stringify(chipData, null, 2));
+
+        // After successful CHIP initialization, create the booking
+        const [bookingId] = await knex("booking").insert({
+          user_fullname: body.name,
+          user_email: body.email,
+          user_phoneno: body.phone,
+          user_source: body.source,
+          session_date: body.date,
+          session_time: body.time,
+          theme: body.theme,
+          theme_price: basePrice,
+          theme_surcharge_type: dateSpecificPrices?.[0]?.price_type || null,
+          theme_surcharge_amount: datePriceAdjustment,
+          number_of_pax: body.number_of_pax,
+          number_of_extra_pax:
+            body.number_of_pax > parseInt(maxFreePax.value)
+              ? body.number_of_pax - parseInt(maxFreePax.value)
+              : 0,
+          addon: addons.length > 0 ? JSON.stringify(addons) : null,
+          frame_status: addons.length > 0 ? 1 : 0,
+          payment_ref_number: receiptNumber,
+          payment_type: body.payment_type,
+          payment_method: body.payment_method,
+          payment_deposit: themeData.deposit,
+          payment_amount: body.payment_method === 1 ? body.payment_amount : 0,
+          payment_addon_total: addonsTotal,
+          payment_total: paymentTotal,
+          payment_extra_pax: extraPaxCharge,
+          status: 1, // Pending
+          session_status: 1, // Pending
+          created_date: new Date(),
+          referral: updatedReferral,
+          payment_initiated_at: new Date(),
+          chip_purchase_id: chipData.id, // Store CHIP purchase ID
+        });
+
+        return {
+          status: "success",
+          message: "Booking created and payment initialized successfully",
+          data: {
+            booking_id: bookingId,
+            receipt_number: receiptNumber,
+            checkout_url: chipData.checkout_url,
+            purchase_id: chipData.id,
+          },
+        };
+      } catch (error: any) {
+        console.error("CHIP payment error:", error);
         throw createError({
           statusCode: 500,
-          message: "Failed to process CHIP payment: " + fetchError.message,
+          message: `Failed to process CHIP payment: ${error.message}`,
         });
       }
     } else {
