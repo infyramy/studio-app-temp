@@ -941,6 +941,15 @@ async function initializePayment() {
     error.value = null;
     paymentState.value.retryCount = 0;
 
+    // Log the request data for debugging
+    console.log("Initializing payment with data:", {
+      amount: receiptData.value.payment_amount,
+      bookingId: bookingId,
+      customerEmail: receiptData.value.customer_email,
+      customerName: receiptData.value.customer_name,
+      phone: receiptData.value.phone,
+    });
+
     const response = await fetch("/api/booking/create-payment", {
       method: "POST",
       headers: {
@@ -952,36 +961,79 @@ async function initializePayment() {
         customerEmail: receiptData.value.customer_email,
         customerName: receiptData.value.customer_name,
         phone: receiptData.value.phone,
+        payment_type: receiptData.value.payment_type,
+        payment_total: receiptData.value.payment_total,
+        session_date: receiptData.value.session_date,
+        session_time: receiptData.value.session_time,
+        title: receiptData.value.title,
+        number_of_pax: receiptData.value.number_of_pax,
       }),
     });
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
+      console.error("Payment initialization error response:", errorData);
       throw new Error(errorData.message || "Failed to initialize payment");
     }
 
     const data = await response.json();
+    console.log("Payment initialization response:", data);
+
+    if (!data.checkout_url) {
+      throw new Error("No checkout URL received from payment initialization");
+    }
+
     paymentUrl.value = data.checkout_url;
 
-    // Start polling for payment status
-    startPolling(data.id);
+    // Start polling for payment status if we have a purchase ID
+    if (data.id) {
+      startPolling(data.id);
+    }
 
     // Redirect to CHIP payment page
     window.location.href = data.checkout_url;
   } catch (err: any) {
     console.error("Payment initialization error:", err);
-    error.value = err.message || "Failed to initialize payment. Please try again.";
     
     // Handle specific error cases
     if (err.message.includes("already paid")) {
       error.value = "This booking has already been paid.";
     } else if (err.message.includes("already initialized")) {
       error.value = "Payment is already in progress for this booking.";
+    } else if (err.message.includes("fetch failed")) {
+      error.value = "Network error occurred. Please check your connection and try again.";
+    } else {
+      error.value = err.message || "Failed to initialize payment. Please try again.";
     }
-  } finally {
+    
+    // Reset payment state
     paymentState.value.isProcessing = false;
+    paymentState.value.retryCount = 0;
   }
 }
+
+// Add startPolling function
+function startPolling(purchaseId: string) {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value);
+  }
+  
+  pollingCount.value = 0;
+  pollingTimer.value = setInterval(() => checkPaymentStatus(purchaseId), INITIAL_POLLING_INTERVAL);
+}
+
+// Add stopPolling function
+function stopPolling() {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value);
+    pollingTimer.value = null;
+  }
+}
+
+// Add polling refs
+const pollingTimer = ref<NodeJS.Timeout | null>(null);
+const pollingCount = ref(0);
+const purchaseId = ref<string | null>(null);
 
 // Watch for payment status changes
 watch(

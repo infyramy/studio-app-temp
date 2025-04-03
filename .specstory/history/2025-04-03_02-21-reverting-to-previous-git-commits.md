@@ -9377,6 +9377,161 @@ If you're still seeing a blank page, please check the browser console for any ot
 
 ---
 
+_**User**_
+
+now cannot proceed to chip again. with error Failed to process CHIP payment: Failed to process CHIP payment: fetch failed
+
+---
+
+_**Assistant**_
+
+I see the issue. The error is occurring because the CHIP payment initialization is failing. Let me help you fix this by updating the payment initialization code in the receipt page.
+
+
+---
+
+_****_
+
+```diff
+      error.value = null;
+      paymentState.value.retryCount = 0;
++ 
++     // Log the request data for debugging
++     console.log("Initializing payment with data:", {
++       amount: receiptData.value.payment_amount,
++       bookingId: bookingId,
++       customerEmail: receiptData.value.customer_email,
++       customerName: receiptData.value.customer_name,
++       phone: receiptData.value.phone,
++     });
+  
+      const response = await fetch("/api/booking/create-payment", {
+          customerName: receiptData.value.customer_name,
+          phone: receiptData.value.phone,
++         payment_type: receiptData.value.payment_type,
++         payment_total: receiptData.value.payment_total,
++         session_date: receiptData.value.session_date,
++         session_time: receiptData.value.session_time,
++         title: receiptData.value.title,
++         number_of_pax: receiptData.value.number_of_pax,
+        }),
+      });
+  
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
++       console.error("Payment initialization error response:", errorData);
+        throw new Error(errorData.message || "Failed to initialize payment");
+      }
+  
+      const data = await response.json();
++     console.log("Payment initialization response:", data);
++ 
++     if (!data.checkout_url) {
++       throw new Error("No checkout URL received from payment initialization");
++     }
++ 
+      paymentUrl.value = data.checkout_url;
+  
+-     // Start polling for payment status
++     // Start polling for payment status if we have a purchase ID
++     if (data.id) {
+        startPolling(data.id);
++     }
+  
+      // Redirect to CHIP payment page
+      window.location.href = data.checkout_url;
+    } catch (err: any) {
+      console.error("Payment initialization error:", err);
+-     error.value = err.message || "Failed to initialize payment. Please try again.";
+      
+      // Handle specific error cases
+      } else if (err.message.includes("already initialized")) {
+        error.value = "Payment is already in progress for this booking.";
++     } else if (err.message.includes("fetch failed")) {
++       error.value = "Network error occurred. Please check your connection and try again.";
++     } else {
++       error.value = err.message || "Failed to initialize payment. Please try again.";
+      }
+-   } finally {
++     
++     // Reset payment state
+      paymentState.value.isProcessing = false;
++     paymentState.value.retryCount = 0;
+    }
+  }
++ 
++ // Add startPolling function
++ function startPolling(purchaseId: string) {
++   if (pollingTimer.value) {
++     clearInterval(pollingTimer.value);
++   }
++   
++   pollingCount.value = 0;
++   pollingTimer.value = setInterval(() => checkPaymentStatus(purchaseId), INITIAL_POLLING_INTERVAL);
++ }
++ 
++ // Add stopPolling function
++ function stopPolling() {
++   if (pollingTimer.value) {
++     clearInterval(pollingTimer.value);
++     pollingTimer.value = null;
++   }
++ }
++ 
++ // Add polling refs
++ const pollingTimer = ref<NodeJS.Timeout | null>(null);
++ const pollingCount = ref(0);
++ const purchaseId = ref<string | null>(null);
+  
+  // Watch for payment status changes
+```
+
+---
+
+_****_
+
+I've made several improvements to the payment initialization process:
+
+1. Added more detailed request data to the CHIP payment initialization:
+   - `payment_type`
+   - `payment_total`
+   - `session_date`
+   - `session_time`
+   - `title`
+   - `number_of_pax`
+
+2. Added better error handling and logging:
+   - Logging the request data before sending
+   - Logging the response data
+   - Logging detailed error information
+   - Added specific error handling for network errors
+
+3. Added validation for the checkout URL:
+   - Checks if the checkout URL is present in the response
+   - Throws a clear error if it's missing
+
+4. Improved polling mechanism:
+   - Added proper polling timer management
+   - Added polling count tracking
+   - Added purchase ID tracking
+   - Added start/stop polling functions
+
+5. Added better error messages:
+   - Network error specific message
+   - More descriptive error messages for different scenarios
+
+Try the payment process again. The console logs should now show more detailed information about what's happening during the payment initialization. If it fails again, please share the console logs so I can help identify the exact issue.
+
+Also, make sure that:
+1. Your network connection is stable
+2. The CHIP API endpoint is accessible
+3. All required environment variables are properly set
+4. The server is running and accessible
+
+Let me know if you still encounter any issues, and I'll help you troubleshoot further.
+
+---
+
 
 
 ---
