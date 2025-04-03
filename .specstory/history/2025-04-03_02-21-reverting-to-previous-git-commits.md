@@ -10737,6 +10737,166 @@ Try the payment process again. The additional logging will help identify any spe
 
 ---
 
+_**User**_
+
+not please double confirm, think first and check any possibilities of error for the booking part
+
+---
+
+_**Assistant**_
+
+
+
+---
+
+_****_
+
+I've examined the booking code again and found potential issues that could be causing the CHIP payment failure:
+
+1. Check if the CHIP API endpoint is correct - try testing with a direct API call using the same credentials
+   
+2. Potential request body issues:
+   - The products price is being converted to cents, but the CHIP API might expect the actual decimal value
+   - Try removing the Math.round() conversion: `price: body.payment_amount`
+   
+3. Database connectivity:
+   - Make sure there's no timeout when querying the database
+   
+4. Transaction safety:
+   - Add a database transaction to ensure the booking is only created if the payment is properly initialized
+
+Let me update the code to fix these potential issues:
+
+---
+
+_****_
+
+```diff
+                    {
+                      name: `${themeData.title}${body.payment_type === 2 ? " (Deposit)" : ""}`,
+-                     price: Math.round(body.payment_amount * 100), // Convert to cents
++                     price: body.payment_amount * 100, // Convert to cents without rounding
+                    },
+                  ],
+              console.log("CHIP Request Body:", JSON.stringify(chipRequestBody, null, 2));
+  
++             const controller = new AbortController();
++             const timeoutId = setTimeout(() => controller.abort(), 30000);
++ 
++             try {
+                const response = await fetch("https://gate.chip-in.asia/api/v1/purchases/", {
+                  method: "POST",
+                  },
+                  body: JSON.stringify(chipRequestBody),
+-               signal: AbortSignal.timeout(30000),
+-               keepalive: true,
++                 signal: controller.signal,
+                });
++ 
++               clearTimeout(timeoutId);
+  
+                console.log("CHIP Response Status:", response.status);
+                console.log("CHIP Response Status Text:", response.statusText);
+                
+-             const responseData = await response.json();
++               // Try to get response data even if the response is not OK
++               let responseData;
++               try {
++                 responseData = await response.json();
+                  console.log("CHIP Response Data:", JSON.stringify(responseData, null, 2));
++               } catch (jsonError) {
++                 console.error("Failed to parse CHIP response as JSON:", jsonError);
++                 throw new Error("Failed to parse CHIP response");
++               }
+  
+                if (!response.ok) {
+-               throw new Error(responseData.message || "Failed to initialize CHIP payment");
++                 throw new Error(responseData?.message || `HTTP error: ${response.status}`);
+                }
+  
+                return responseData;
++             } catch (err) {
++               clearTimeout(timeoutId);
++               throw err;
++             }
+            },
+            3, // retries
+            1000 // timeout
+          );
+  
++         // Start a database transaction for booking creation
++         const trx = await knex.transaction();
++         try {
+            // Create the booking after successful CHIP initialization
+-         const [bookingId] = await knex("booking").insert({
++           const [bookingId] = await trx("booking").insert({
+              user_fullname: body.name,
+              user_email: body.email,
+              chip_purchase_id: chipData.id, // Store CHIP purchase ID
+            });
++ 
++           // Commit the transaction
++           await trx.commit();
+  
+            return {
+              },
+            };
++         } catch (trxError) {
++           // Rollback the transaction if there's an error
++           await trx.rollback();
++           throw trxError;
++         }
+        } catch (fetchError: any) {
+          console.error("CHIP payment fetch error:", fetchError);
+```
+
+---
+
+_****_
+
+I've made several important changes to fix the potential issues with the CHIP payment:
+
+1. Fixed price handling:
+   - Removed `Math.round()` to prevent potential rounding issues
+   - Still converting to cents as required by payment processors, but without rounding
+
+2. Improved timeout handling:
+   - Added manual controller and timeout instead of using AbortSignal.timeout()
+   - Properly clearing timeouts to prevent memory leaks
+   - Better error propagation when timeouts occur
+
+3. Enhanced error handling:
+   - Added try/catch around JSON parsing to handle invalid responses
+   - Better error messages with HTTP status codes
+   - Added optional chaining for response data error messages
+
+4. Added database transaction safety:
+   - Wrapped booking creation in a transaction
+   - Adds commit/rollback logic to prevent partial data insertion
+   - Ensures database consistency even if there's an error
+
+These changes should help address the payment initialization issues by:
+1. Ensuring the correct price format is sent to CHIP
+2. Handling network timeouts more gracefully
+3. Providing better error information for debugging
+4. Ensuring database consistency
+
+Try the payment process again. If it still fails, please share the error messages from the console logs, particularly the CHIP Request Body and Response Data sections, as they will provide more insight into what's happening with the API call.
+
+---
+
+_**User**_
+
+everything working fine, but can you pls check whatsapp not sending
+
+---
+
+_**Assistant**_
+
+
+
+---
+
 
 
 ---

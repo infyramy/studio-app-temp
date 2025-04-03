@@ -593,6 +593,22 @@ export default defineEventHandler(async (event: H3Event) => {
           // Commit the transaction
           await trx.commit();
 
+          // Send WhatsApp notifications for CHIP payments
+          const adminPhoneNumber = await knex("config")
+            .select("value")
+            .where("code", "admin_phoneno")
+            .first();
+
+          // Send WhatsApp notification to admin
+          await sendWhatsAppNotification(
+            adminPhoneNumber.value,
+            receiptNumber,
+            "admin"
+          );
+
+          // Send WhatsApp notification to customer
+          await sendWhatsAppNotification(body.phone, receiptNumber, "customer");
+
           return {
             status: "success",
             message: "Booking created and payment initialized successfully",
