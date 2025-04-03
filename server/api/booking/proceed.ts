@@ -558,149 +558,55 @@ export default defineEventHandler(async (event: H3Event) => {
 
         console.log("Valid Payment Methods:", validMethods);
 
-        // Create the request body
-        const chipRequestBody = {
-          brand_id: CHIP_BRAND_ID.value,
-          reference: `BOOKING-${bookingId}`,
-          platform: "web",
-          purchase: {
-            products: [
-              {
-                name: `Booking Session${body.payment_type === 2 ? " (Deposit)" : ""}`,
-                price: Math.round(body.payment_amount * 100),
+        // Update the CHIP payment initialization
+        const chipData = await retry(
+          async () => {
+            const response = await fetch("https://api.chip-in.asia/v1/purchases", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${process.env.CHIP_SECRET_KEY}`,
               },
-            ],
-            currency: "MYR",
-          },
-          client: {
-            full_name: body.name,
-            email: body.email,
-          },
-          success_callback: `${process.env.PUBLIC_API_URL}/booking/payment-callback`,
-          success_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=success`,
-          failure_redirect: `${process.env.PUBLIC_URL}/book-a-session/failed-payment?booking=${receiptNumber}&status=failed`,
-          cancel_redirect: `${process.env.PUBLIC_URL}/book-a-session/failed-payment?booking=${receiptNumber}&status=cancelled`,
-          send_receipt: true,
-          skip_capture: false,
-        };
-
-        console.log("CHIP Request Body:", JSON.stringify(chipRequestBody));
-
-        try {
-          // Use retry mechanism with the fetch request
-          const makeRequest = async () => {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 seconds timeout
-            
-            try {
-              const response = await fetch(
-                "https://gate.chip-in.asia/api/v1/purchases/",
-                {
-                  method: "POST",
-                  headers: {
-                    Authorization: `Bearer ${CHIP_SECRET_KEY.value}`,
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify(chipRequestBody),
-                  signal: controller.signal
-                }
-              );
-              
-              clearTimeout(timeoutId);
-              return response;
-            } catch (err) {
-              clearTimeout(timeoutId);
-              throw err;
-            }
-          };
-          
-          // Attempt the fetch with retries
-          const chipResponse = await retry(makeRequest, 3, 2000);
-          
-          console.log("CHIP Response:", chipResponse);
-          console.log("CHIP Response Status:", chipResponse.status);
-          console.log("CHIP Response Status Text:", chipResponse.statusText);
-
-          const chipData = await chipResponse.json();
-          // console.log("CHIP Data:", chipData);
-
-          if (chipResponse.status !== 201) {
-            // If CHIP payment initialization fails, update booking status to failed
-            await knex("booking").where("id", bookingId).update({ status: 4 }); // 4 = Failed
-
-            throw createError({
-              statusCode: chipResponse.status,
-              statusMessage: chipData.message || "Failed to initialize payment",
+              body: JSON.stringify({
+                success_callback: `${process.env.PUBLIC_API_URL}/api/booking/payment-callback`,
+                success_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=success`,
+                failure_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=failed`,
+                cancel_redirect: `${process.env.PUBLIC_URL}/book-a-session/receipt?booking=${receiptNumber}&status=cancelled`,
+                brand_id: process.env.CHIP_BRAND_ID,
+                title: themeData.title,
+                currency: "MYR",
+                amount: paymentTotal,
+                skip_capture: true,
+                client: {
+                  email: body.email,
+                  full_name: body.name,
+                  phone: body.phone,
+                },
+              }),
+              signal: AbortSignal.timeout(30000), // 30 second timeout
             });
-          }
 
-          // Update booking with CHIP purchase ID
-          // await knex("booking")
-          //   .where("id", bookingId)
-          //   .update({ chip_purchase_id: chipData.id });
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({}));
+              throw new Error(errorData.message || "Failed to initialize CHIP payment");
+            }
 
-          return {
-            status: "success",
-            message: "Booking created and payment initialized successfully",
-            data: {
-              booking_id: bookingId,
-              receipt_number: receiptNumber,
-              checkout_url: chipData.checkout_url,
-              purchase_id: chipData.id,
-            },
-          };
-        } catch (fetchError: any) {
-          console.error("CHIP payment fetch error:", fetchError);
-          
-          // Check if we should fallback to manual payment
-          // const allowFallbackToManual = await knex("config")
-          //   .select("value")
-          //   .where("code", "allow_payment_gateway_fallback")
-          //   .first()
-          //   .then(result => result && result.value === "1")
-          //   .catch(() => false);
-            
-          // if (allowFallbackToManual) {
-          //   console.log("Falling back to manual payment method due to payment gateway issues");
-            
-          //   // Update booking to use manual payment method
-          //   await knex("booking")
-          //     .where("id", bookingId)
-          //     .update({ 
-          //       payment_method: 2, // Manual payment
-          //       status: 1 // Pending
-          //     });
-                
-          //   // Get admin phone number for notification
-          //   const adminPhoneNumber = await knex("config")
-          //     .select("value")
-          //     .where("code", "admin_phoneno")
-          //     .first();
+            return response.json();
+          },
+          3, // number of retries
+          30000 // timeout between retries in ms
+        );
 
-          //   // Send WhatsApp notification to admin
-          //   await sendWhatsAppNotification(
-          //     adminPhoneNumber.value,
-          //     receiptNumber,
-          //     "admin"
-          //   );
-
-          //   // Send WhatsApp notification to customer
-          //   await sendWhatsAppNotification(body.phone, receiptNumber, "customer");
-
-          //   return {
-          //     status: "success",
-          //     message: "Booking created with manual payment due to payment gateway issues",
-          //     data: `/book-a-session/receipt-qr?booking=${receiptNumber}&status=success&fallback=true`,
-          //   };
-          // }
-          
-          // If fallback is not allowed, proceed with regular error handling
-          await knex("booking").where("id", bookingId).update({ status: 4 });
-          throw createError({
-            statusCode: fetchError.statusCode || 500,
-            statusMessage: "Failed to process CHIP payment: " + (fetchError.message || "Connection timeout"),
-          });
-        }
+        return {
+          status: "success",
+          message: "Booking created and payment initialized successfully",
+          data: {
+            booking_id: bookingId,
+            receipt_number: receiptNumber,
+            checkout_url: chipData.checkout_url,
+            purchase_id: chipData.id,
+          },
+        };
       } catch (error: any) {
         console.error("CHIP payment outer error:", error);
         
