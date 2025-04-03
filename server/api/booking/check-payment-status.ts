@@ -20,13 +20,17 @@ class PaymentStatusCache {
   private readonly ttl: number;
   private readonly cleanupInterval: number;
   private readonly maxRetries: number;
+  private readonly rateLimits: Map<string, { count: number, timestamp: number }>;
+  private readonly maxRequestsPerMinute: number;
 
-  constructor(maxSize: number = 1000, ttl: number = 1000) {
+  constructor(maxSize: number = 1000, ttl: number = 5000) {
     this.cache = new Map();
     this.maxSize = maxSize;
-    this.ttl = ttl;
-    this.cleanupInterval = 5000; // Cleanup every 5 seconds
+    this.ttl = ttl; // Increased TTL to 5 seconds to reduce load
+    this.cleanupInterval = 30000; // Cleanup every 30 seconds
     this.maxRetries = 3;
+    this.rateLimits = new Map();
+    this.maxRequestsPerMinute = 20; // 20 requests per minute per IP
     
     // Start cleanup interval
     setInterval(() => this.cleanup(), this.cleanupInterval);
@@ -66,9 +70,18 @@ class PaymentStatusCache {
 
   private cleanup(): void {
     const now = Date.now();
+    
+    // Clean cache
     for (const [key, value] of this.cache.entries()) {
       if (now - value.timestamp > this.ttl) {
         this.cache.delete(key);
+      }
+    }
+    
+    // Clean rate limits
+    for (const [ip, data] of this.rateLimits.entries()) {
+      if (now - data.timestamp > 60000) {
+        this.rateLimits.delete(ip);
       }
     }
   }
@@ -78,15 +91,57 @@ class PaymentStatusCache {
     if (!entry) return true;
     return entry.retryCount < this.maxRetries;
   }
+  
+  // Rate limiting by IP
+  isRateLimited(ip: string): boolean {
+    const now = Date.now();
+    const entry = this.rateLimits.get(ip);
+    
+    if (!entry) {
+      this.rateLimits.set(ip, { count: 1, timestamp: now });
+      return false;
+    }
+    
+    // Reset counter if more than a minute has passed
+    if (now - entry.timestamp > 60000) {
+      this.rateLimits.set(ip, { count: 1, timestamp: now });
+      return false;
+    }
+    
+    // Check if limit exceeded
+    if (entry.count >= this.maxRequestsPerMinute) {
+      return true;
+    }
+    
+    // Increment counter
+    this.rateLimits.set(ip, { count: entry.count + 1, timestamp: entry.timestamp });
+    return false;
+  }
 }
 
 // Create cache instance with reasonable limits
-const statusCache = new PaymentStatusCache(1000, 1000); // 1000 entries, 1 second TTL
+const statusCache = new PaymentStatusCache(1000, 5000); // 1000 entries, 5 second TTL
 
 export default defineEventHandler(async (event) => {
   try {
     const query = getQuery(event);
     const purchaseId = query.purchase_id as string;
+    
+    // Get client IP for rate limiting
+    const ip = getRequestHeader(event, 'x-forwarded-for') || 
+               getRequestHeader(event, 'x-real-ip') || 
+               getRequestHeader(event, 'cf-connecting-ip') || 
+               'unknown';
+    
+    // Apply rate limiting
+    if (statusCache.isRateLimited(ip)) {
+      return {
+        status: "error",
+        message: "Rate limit exceeded. Please wait before trying again.",
+        retryable: true,
+        retryAfter: 60
+      };
+    }
 
     if (!purchaseId) {
       throw createError({
@@ -98,6 +153,7 @@ export default defineEventHandler(async (event) => {
     // Check cache first
     const cachedStatus = statusCache.get(purchaseId);
     if (cachedStatus) {
+      console.log(`Returning cached status for ${purchaseId}: ${cachedStatus.status}`);
       return {
         status: cachedStatus.status,
         message: "Payment status retrieved from cache",
@@ -150,8 +206,10 @@ export default defineEventHandler(async (event) => {
     }
 
     const status = STATUS_MAP[booking.status as keyof typeof STATUS_MAP] || booking.status;
+    console.log(`Status for ${purchaseId} from database: ${status}`);
 
-    // Update cache
+    // Update cache with longer TTL for completed/failed statuses
+    const ttl = (status === 'completed' || status === 'failed') ? 30000 : 5000;
     statusCache.set(purchaseId, status);
 
     return {

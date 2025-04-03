@@ -1,7 +1,18 @@
 import db from "../utils/knex";
 import { addMinutes, isBefore } from "date-fns";
 
+// Add a simple lock mechanism to prevent concurrent executions
+let isCheckingPayments = false;
+
 export async function checkPaymentStatus(): Promise<void> {
+  // Prevent concurrent executions
+  if (isCheckingPayments) {
+    console.log("Payment status check already in progress, skipping");
+    return;
+  }
+  
+  isCheckingPayments = true;
+  
   try {
     const tenMinutesAgo = addMinutes(new Date(), -10);
 
@@ -34,10 +45,12 @@ export async function checkPaymentStatus(): Promise<void> {
       // console.log("No expired bookings found");
     }
 
-    console.log("Completed");
+    console.log("Payment status check completed");
     
   } catch (error) {
     console.error("Error checking payment status:", error);
-    throw error;
+  } finally {
+    // Release lock whether successful or not
+    isCheckingPayments = false;
   }
 }
