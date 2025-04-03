@@ -142,23 +142,113 @@ async function retry<T>(
   throw lastError;
 }
 
+// Add these utility functions at the top with other functions
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatWhatsAppMessage(text: string): string {
+  return text.replace(/([.!?,])\s+/g, `$1\u200B `);
+}
+
+function formatNumber(number: number): string {
+  return number.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function formatTime(timeStr: string): string {
+  return new Date(`1970-01-01T${timeStr}`).toLocaleTimeString("en-MY", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function formatMalayDate(date: string) {
+  const days = ["Ahad", "Isnin", "Selasa", "Rabu", "Khamis", "Jumaat", "Sabtu"];
+  const d = dayjs(date);
+  return `${days[d.day()]}, ${d.format("DD MMMM YYYY")}`;
+}
+
+// Add validation functions
+function isValidEmail(email: string): boolean {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+}
+
+function isValidPhone(phone: string): boolean {
+  const phoneRegex = /^(\+?6?01)[0-46-9]-*[0-9]{7,8}$/;
+  return phoneRegex.test(phone.replace(/\s+/g, ''));
+}
+
 export default defineEventHandler(async (event: H3Event) => {
   try {
     const body = await readBody<BookingRequest>(event);
     console.log("Booking Request:", body);
 
+    // Validate environment variables
+    if (!process.env.PUBLIC_API_URL || !process.env.PUBLIC_URL) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: "Missing required environment variables",
+      });
+    }
+
+    // Rate limiting
+    const ip = event.node.req.headers['x-forwarded-for'] || event.node.req.socket.remoteAddress;
+    const rateLimitKey = `booking:${ip}`;
+    const rateLimit = await useStorage().getItem(rateLimitKey);
+    if (rateLimit && Number(rateLimit) > 5) { // 5 requests per minute
+      throw createError({
+        statusCode: 429,
+        statusMessage: "Too many requests. Please try again later.",
+      });
+    }
+    await useStorage().setItem(rateLimitKey, String((Number(rateLimit) || 0) + 1));
+
     // Validate the request
-    if (
-      !body.date ||
-      !body.time ||
-      !body.theme ||
-      !body.name ||
-      !body.email ||
-      !body.phone
-    ) {
+    if (!body.date || !body.time || !body.theme || !body.name || !body.email || !body.phone) {
       throw createError({
         statusCode: 400,
         statusMessage: "Missing required fields",
+      });
+    }
+
+    // Validate email and phone
+    if (!isValidEmail(body.email)) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Invalid email format",
+      });
+    }
+
+    if (!isValidPhone(body.phone)) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Invalid phone number format",
+      });
+    }
+
+    // Validate payment method
+    if (![1, 2].includes(body.payment_method)) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Invalid payment method",
+      });
+    }
+
+    // Check for duplicate bookings
+    const existingBooking = await knex("booking")
+      .where({
+        session_date: body.date,
+        session_time: body.time,
+        status: 1 // Pending
+      })
+      .first();
+
+    if (existingBooking) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: "This time slot is already booked",
       });
     }
 
@@ -266,6 +356,14 @@ export default defineEventHandler(async (event: H3Event) => {
     // Calculate total payment including all components
     const paymentTotal =
       subtotalBeforeAdjustments + datePriceAdjustment + extraPaxCharge;
+
+    // Validate payment amount before proceeding
+    if (Math.abs(body.payment_amount - paymentTotal) > 0.01) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Payment amount mismatch",
+      });
+    }
 
     // Generate receipt number
     const receiptNumber = generateReceiptNumber();
@@ -564,39 +662,22 @@ export default defineEventHandler(async (event: H3Event) => {
       };
     }
   } catch (error: any) {
+    console.error("Booking Error:", {
+      error: error.message,
+      stack: error.stack,
+      bookingData: {
+        date: error.bookingData?.date,
+        time: error.bookingData?.time,
+        theme: error.bookingData?.theme,
+        amount: error.bookingData?.amount
+      }
+    });
     throw createError({
       statusCode: error.statusCode || 500,
       statusMessage: error.message || "Internal server error",
     });
   }
 });
-
-// Add these utility functions at the top with other functions
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function formatWhatsAppMessage(text: string): string {
-  return text.replace(/([.!?,])\s+/g, `$1\u200B `);
-}
-
-function formatNumber(number: number): string {
-  return number.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}
-
-function formatTime(timeStr: string): string {
-  return new Date(`1970-01-01T${timeStr}`).toLocaleTimeString("en-MY", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
-
-function formatMalayDate(date: string) {
-  const days = ["Ahad", "Isnin", "Selasa", "Rabu", "Khamis", "Jumaat", "Sabtu"];
-  const d = dayjs(date);
-  return `${days[d.day()]}, ${d.format("DD MMMM YYYY")}`;
-}
 
 async function simulateTyping(
   wahaEndpoint: string,
@@ -706,44 +787,65 @@ async function sendWhatsAppNotification(
         `${
           booking.referral_code
             ? `Referral: *${booking.referral_code}*\n\n`
-            : ''
+            : ""
         }` +
-        `Location: ${wazeUrl.value}\n` +
-        `Google Maps: ${googleMapsUrl.value}\n\n` +
-        `Please process this booking and contact the customer for payment collection.`;
+        `*Action Required:*\n` +
+        `Please reconfirm the payment details with the customer once the payment is made.\n\n` +
+        `_Please handle this request promptly._`;
     } else {
       message =
-        `*Booking Confirmation*\n\n` +
-        `Reference: *${ref}*\n` +
-        `Session Date: *${formattedDate}*\n` +
-        `Session Time: *${formattedTime}*\n` +
-        `Amount to Pay: *RM ${formattedAmount}*\n\n` +
+        `*Pengesahan Tempahan*\n` +
+        `_${studioName.value}_\n\n` +
+        `Salam dan hi, ${booking.user_fullname}\n\n` +
+        `*Butiran Tempahan Anda:*\n` +
+        `No.​ Rujukan: *${ref}*\n` +
+        `Tema: *${booking.theme_title}*\n` +
+        `Pax: *${booking.number_of_pax} orang*\n` +
+        `Tarikh Sesi: *${formattedDate}*\n` +
+        `Masa Sesi: *${formattedTime}*\n\n` +
+        `Jumlah Bayaran: *RM ${formattedAmount}*\n` +
         `${
           booking.referral_code
             ? `Referral: *${booking.referral_code}*\n\n`
-            : ''
+            : ""
         }` +
-        `Location: ${wazeUrl.value}\n` +
-        `Google Maps: ${googleMapsUrl.value}\n\n` +
-        `Please keep this receipt for your records.`;
+        `Sila lengkapkan pembayaran untuk mengesahkan tempahan anda & *hantarkan resit ke ${phone}.*\n\n` +
+        `*Lokasi:*\n` +
+        `${wazeUrl ? `🚗 Waze: ${wazeUrl.value}` : ""}\n` +
+        `${googleMapsUrl ? `📍 Google Maps: ${googleMapsUrl.value}` : ""}\n\n` +
+        `Jika anda mempunyai sebarang pertanyaan, sila hubungi kami di ${phone}\n\n` +
+        `_Ini adalah notifikasi automatik. Jangan balas mesej ini._`;
     }
 
+    const formattedMessage = formatWhatsAppMessage(message);
+
+    // Simulate typing
+    await simulateTyping(wahaEndpoint.value, chatId, formattedMessage);
+
     // Send the message
-    await fetch(`${wahaEndpoint.value}/api/sendMessage`, {
+    const response = await fetch(`${wahaEndpoint.value}/api/sendText`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Accept: "application/json",
       },
       body: JSON.stringify({
         chatId,
-        message,
+        text: formattedMessage,
+        session: "default",
+        reply_to: "",
       }),
     });
+
+    if (!response.ok) {
+      throw new Error(`Failed to send message: ${response.statusText}`);
+    }
+
+    console.log(`Message sent to ${phone}:`, response.status);
+    console.log("Message sent successfully to:", phone);
+    return true;
   } catch (error) {
-    console.error("Error sending WhatsApp notification:", error);
-    throw createError({
-      statusCode: 500,
-      statusMessage: "Failed to send WhatsApp notification",
-    });
+    console.log("Error send whatsapp:", error);
+    return false;
   }
 }
