@@ -456,56 +456,24 @@ export default defineEventHandler(async (event: H3Event) => {
       if (referralData) updatedReferral = referralData.id;
     }
 
-    // Create the booking with pending status
-    const [bookingId] = await knex("booking").insert({
-      user_fullname: body.name,
-      user_email: body.email,
-      user_phoneno: body.phone,
-      user_source: body.source,
-      session_date: body.date,
-      session_time: body.time,
-      theme: body.theme,
-      theme_price: basePrice,
-      theme_surcharge_type: dateSpecificPrices?.[0]?.price_type || null,
-      theme_surcharge_amount: datePriceAdjustment,
-      number_of_pax: body.number_of_pax,
-      number_of_extra_pax:
-        body.number_of_pax > parseInt(maxFreePax.value)
-          ? body.number_of_pax - parseInt(maxFreePax.value)
-          : 0,
-      addon: addons.length > 0 ? JSON.stringify(addons) : null,
-      frame_status: addons.length > 0 ? 1 : 0,
-      payment_ref_number: receiptNumber,
-      payment_type: body.payment_type,
-      payment_method: body.payment_method,
-      payment_deposit: themeData.deposit,
-      payment_amount: body.payment_method === 1 ? body.payment_amount : 0,
-      payment_addon_total: addonsTotal,
-      payment_total: paymentTotal,
-      payment_extra_pax: extraPaxCharge,
-      status: 1, // Pending
-      session_status: 1, // Pending
-      created_date: new Date(),
-      referral: updatedReferral,
-    });
-    // console.log("Booking ID:", bookingId);
-
+    // Update the CHIP payment initialization code
     if (body.payment_method === 1) {
       // CHIP Payment
-      // Update the CHIP payment initialization code
       try {
         // Get CHIP credentials from database
         const chipConfig = await knex("config")
-          .select("value")
-          .whereIn("code", ["chip_secret_key", "chip_brand_id"])
+          .select("code", "value")
+          .whereIn("code", ["chip_key", "chip_brand_id"])
           .then((rows) => {
             const config = {} as Record<string, string>;
             rows.forEach((row) => {
-              if (row.code === "chip_secret_key") config.secretKey = row.value;
+              if (row.code === "chip_key") config.secretKey = row.value;
               if (row.code === "chip_brand_id") config.brandId = row.value;
             });
             return config;
           });
+
+        console.log("CHIP Config:", chipConfig);
 
         if (!chipConfig.secretKey || !chipConfig.brandId) {
           throw new Error("CHIP credentials not found in database");
@@ -557,10 +525,39 @@ export default defineEventHandler(async (event: H3Event) => {
           1000 // timeout
         );
 
-        // Update booking with CHIP purchase ID
-        await knex("booking")
-          .where("id", bookingId)
-          .update({ chip_purchase_id: chipData.id });
+        // Create the booking after successful CHIP initialization
+        const [bookingId] = await knex("booking").insert({
+          user_fullname: body.name,
+          user_email: body.email,
+          user_phoneno: body.phone,
+          user_source: body.source,
+          session_date: body.date,
+          session_time: body.time,
+          theme: body.theme,
+          theme_price: basePrice,
+          theme_surcharge_type: dateSpecificPrices?.[0]?.price_type || null,
+          theme_surcharge_amount: datePriceAdjustment,
+          number_of_pax: body.number_of_pax,
+          number_of_extra_pax:
+            body.number_of_pax > parseInt(maxFreePax.value)
+              ? body.number_of_pax - parseInt(maxFreePax.value)
+              : 0,
+          addon: addons.length > 0 ? JSON.stringify(addons) : null,
+          frame_status: addons.length > 0 ? 1 : 0,
+          payment_ref_number: receiptNumber,
+          payment_type: body.payment_type,
+          payment_method: body.payment_method,
+          payment_deposit: themeData.deposit,
+          payment_amount: body.payment_method === 1 ? body.payment_amount : 0,
+          payment_addon_total: addonsTotal,
+          payment_total: paymentTotal,
+          payment_extra_pax: extraPaxCharge,
+          status: 1, // Pending
+          session_status: 1, // Pending
+          created_date: new Date(),
+          referral: updatedReferral,
+          chip_purchase_id: chipData.id, // Store CHIP purchase ID
+        });
 
         return {
           status: "success",

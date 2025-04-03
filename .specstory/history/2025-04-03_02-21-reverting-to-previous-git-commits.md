@@ -10302,6 +10302,170 @@ Try the payment process again. The connection timeout error should be resolved, 
 
 ---
 
+_**User**_
+
+first time, Failed to process CHIP payment: CHIP credentials not found in database
+
+second time retry clicking continue, This time slot is already booked.
+
+i think you already broke down my code.
+
+pls fix, 1. chip secret key and brand id in config db maybe just pull through, 2. must go into chip payment and right now is problem
+
+---
+
+_**Assistant**_
+
+I understand the issues. Let me help fix both problems:
+
+1. The CHIP credentials are not being found in the database
+2. The booking is being created before the CHIP payment initialization, causing the "time slot already booked" error
+
+Let me fix this by updating the proceed endpoint:
+
+
+
+---
+
+_****_
+
+```diff
+      }
+  
+-     // Create the booking with pending status
+-     const [bookingId] = await knex("booking").insert({
+-       user_fullname: body.name,
+-       user_email: body.email,
+-       user_phoneno: body.phone,
+-       user_source: body.source,
+-       session_date: body.date,
+-       session_time: body.time,
+-       theme: body.theme,
+-       theme_price: basePrice,
+-       theme_surcharge_type: dateSpecificPrices?.[0]?.price_type || null,
+-       theme_surcharge_amount: datePriceAdjustment,
+-       number_of_pax: body.number_of_pax,
+-       number_of_extra_pax:
+-         body.number_of_pax > parseInt(maxFreePax.value)
+-           ? body.number_of_pax - parseInt(maxFreePax.value)
+-           : 0,
+-       addon: addons.length > 0 ? JSON.stringify(addons) : null,
+-       frame_status: addons.length > 0 ? 1 : 0,
+-       payment_ref_number: receiptNumber,
+-       payment_type: body.payment_type,
+-       payment_method: body.payment_method,
+-       payment_deposit: themeData.deposit,
+-       payment_amount: body.payment_method === 1 ? body.payment_amount : 0,
+-       payment_addon_total: addonsTotal,
+-       payment_total: paymentTotal,
+-       payment_extra_pax: extraPaxCharge,
+-       status: 1, // Pending
+-       session_status: 1, // Pending
+-       created_date: new Date(),
+-       referral: updatedReferral,
+-     });
+-     // console.log("Booking ID:", bookingId);
+- 
++     // Update the CHIP payment initialization code
+      if (body.payment_method === 1) {
+        // CHIP Payment
+-       // Update the CHIP payment initialization code
+        try {
+          // Get CHIP credentials from database
+          const chipConfig = await knex("config")
+-           .select("value")
+-           .whereIn("code", ["chip_secret_key", "chip_brand_id"])
++           .select("code", "value")
++           .whereIn("code", ["chip_key", "chip_brand_id"])
+            .then((rows) => {
+              const config = {} as Record<string, string>;
+              rows.forEach((row) => {
+-               if (row.code === "chip_secret_key") config.secretKey = row.value;
++               if (row.code === "chip_key") config.secretKey = row.value;
+                if (row.code === "chip_brand_id") config.brandId = row.value;
+              });
+              return config;
+            });
+  
++         console.log("CHIP Config:", chipConfig);
++ 
+          if (!chipConfig.secretKey || !chipConfig.brandId) {
+            throw new Error("CHIP credentials not found in database");
+          );
+  
+-         // Update booking with CHIP purchase ID
+-         await knex("booking")
+-           .where("id", bookingId)
+-           .update({ chip_purchase_id: chipData.id });
++         // Create the booking after successful CHIP initialization
++         const [bookingId] = await knex("booking").insert({
++           user_fullname: body.name,
++           user_email: body.email,
++           user_phoneno: body.phone,
++           user_source: body.source,
++           session_date: body.date,
++           session_time: body.time,
++           theme: body.theme,
++           theme_price: basePrice,
++           theme_surcharge_type: dateSpecificPrices?.[0]?.price_type || null,
++           theme_surcharge_amount: datePriceAdjustment,
++           number_of_pax: body.number_of_pax,
++           number_of_extra_pax:
++             body.number_of_pax > parseInt(maxFreePax.value)
++               ? body.number_of_pax - parseInt(maxFreePax.value)
++               : 0,
++           addon: addons.length > 0 ? JSON.stringify(addons) : null,
++           frame_status: addons.length > 0 ? 1 : 0,
++           payment_ref_number: receiptNumber,
++           payment_type: body.payment_type,
++           payment_method: body.payment_method,
++           payment_deposit: themeData.deposit,
++           payment_amount: body.payment_method === 1 ? body.payment_amount : 0,
++           payment_addon_total: addonsTotal,
++           payment_total: paymentTotal,
++           payment_extra_pax: extraPaxCharge,
++           status: 1, // Pending
++           session_status: 1, // Pending
++           created_date: new Date(),
++           referral: updatedReferral,
++           chip_purchase_id: chipData.id, // Store CHIP purchase ID
++         });
+  
+          return {
+```
+
+---
+
+_****_
+
+I've made two important changes to fix the issues:
+
+1. Fixed the CHIP credentials lookup:
+   - Changed the config codes to match your database: `chip_key` and `chip_brand_id`
+   - Added logging to help debug the credentials retrieval
+   - Properly mapping the config values to the correct keys
+
+2. Fixed the booking flow:
+   - Moved the booking creation to happen AFTER successful CHIP payment initialization
+   - This prevents the "time slot already booked" error when retrying
+   - The booking is now created with the CHIP purchase ID in a single operation
+
+The key improvements are:
+- Correct config code names (`chip_key` instead of `chip_secret_key`)
+- Better error handling and logging
+- Proper sequencing of operations (CHIP initialization before booking creation)
+- Single database operation for booking creation with CHIP details
+
+Try the payment process again. You should now:
+1. Successfully retrieve the CHIP credentials from the database
+2. Initialize the CHIP payment
+3. Create the booking only after successful CHIP initialization
+4. Not encounter the "time slot already booked" error on retries
+
+Let me know if you still encounter any issues.
+
+---
+
 
 
 ---
