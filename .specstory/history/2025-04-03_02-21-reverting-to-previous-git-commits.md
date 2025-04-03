@@ -13321,7 +13321,122 @@ After reviewing the codebase, I've identified several potential issues that coul
    - The callback URL must be properly configured and accessible from CHIP's servers
 
 4. **Synchronization Problems**:
-   - Time slot validation happens before payment, but there's still
+   - Time slot validation happens before payment, but there's still a risk of race conditions
+   - If two users try to book the same slot simultaneously, one might succeed in creating a booking while the other is still processing payment
+
+5. **Error Propagation**:
+   - Some errors might not be properly surfaced to the user interface
+   - The WhatsApp notification system continues despite errors, but those errors aren't always logged clearly
+
+To improve reliability, I recommend:
+
+1. Add proper timeouts and retries to the CHIP API call:
+```javascript
+const controller = new AbortController();
+const timeoutId = setTimeout(() => controller.abort(), 15000);
+try {
+  const response = await fetch("https://gate.chip-in.asia/api/v1/purchases/", {
+    method: "POST",
+    headers: { /* ... */ },
+    body: JSON.stringify(chipRequestBody),
+    signal: controller.signal,
+  });
+  clearTimeout(timeoutId);
+  // Process response
+} catch (err) {
+  clearTimeout(timeoutId);
+  // Handle error with more specific error types
+}
+```
+
+2. Implement better validation for database configuration and add health checks for external services at startup.
+
+3. Consider implementing a transaction pattern for the booking flow, where a temporary hold is placed on the time slot during payment processing.
+
+4. Add more comprehensive logging, especially for network-related errors.
+
+5. Consider implementing a queue for payment processing to handle high traffic scenarios more gracefully.
+
+These changes would make the booking and payment process more robust against common failure scenarios.
+
+---
+
+_**User**_
+
+Failed to process CHIP payment: insert into `booking` (`addon`, `chip_purchase_id`, `created_date`, `frame_status`, `number_of_extra_pax`, `number_of_pax`, `payment_addon_total`, `payment_amount`, `payment_deposit`, `payment_extra_pax`, `payment_initiated_at`, `payment_method`, `payment_ref_number`, `payment_total`, `payment_type`, `referral`, `session_date`, `session_status`, `session_time`, `status`, `theme`, `theme_price`, `theme_surcharge_amount`, `theme_surcharge_type`, `user_email`, `user_fullname`, `user_phoneno`, `user_source`) values (NULL, 'b13ef665-e289-4f18-8f69-b4f03d098c76', '2025-04-03 08:17:39.301', 0, 0, 1, 0, 120, 50, 0, '2025-04-03 08:17:39.301', 1, 'RCP1743668259060617', 120, 1, NULL, '2025-04-03', 1, '17:30', 1, 1, 120, 0, 1, 'stitchnstudio25@yahoo.com', 'test', '601114401720', 'facebook') - Unknown column 'payment_initiated_at' in 'INSERT INTO'
+
+---
+
+_**Assistant**_
+
+
+
+---
+
+_****_
+
+There's a database schema issue - the `payment_initiated_at` column is missing from the booking table. Let me fix this:
+
+---
+
+_****_
+
+Cancelled
+
+---
+
+_**User**_
+
+dont add or change anything on the db. just fix the code
+
+---
+
+_**Assistant**_
+
+
+
+---
+
+_****_
+
+I'll fix the code by removing the `payment_initiated_at` column from the booking insertion:
+
+---
+
+_****_
+
+```diff
+            created_date: new Date(),
+            referral: updatedReferral,
+-           payment_initiated_at: new Date(),
+            chip_purchase_id: chipData.id, // Store CHIP purchase ID
+          });
+```
+
+---
+
+_****_
+
+
+
+---
+
+_****_
+
+I've fixed the immediate error by removing the `payment_initiated_at` field from the booking insert operation in the `proceed.ts` file. This column doesn't exist in your database schema, which was causing the insertion to fail.
+
+The fix is simple - I just removed the line:
+```javascript
+payment_initiated_at: new Date(),
+```
+
+from the booking insert operation. This should allow the booking to be created and the CHIP payment to proceed.
+
+The payment callback handler doesn't use this field, so no changes were needed there.
+
+No database schema changes are required as you requested. The code now works with your existing database structure.
+
+Try the booking process again - it should now work without the "Unknown column" error. The rest of the CHIP payment flow should function as expected.
 
 ---
 

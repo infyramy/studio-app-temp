@@ -23,6 +23,8 @@ const PUBLIC_ROUTES = [
   "/api/booking/get-date-range",
   "/api/setting/get-organization",
   "/api/booking/update-payment-failed",
+  "/api/booking/update-status",
+  "/api/booking/check-payment-status",
   "/api/setting/get-holidays",
 ];
 
