@@ -1021,6 +1021,39 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Add fetchReceiptData function
+async function fetchReceiptData() {
+  try {
+    isLoading.value = true;
+    error.value = null;
+
+    if (!route.query.booking) {
+      throw new Error("No booking reference provided");
+    }
+
+    const response = await fetch(
+      `/api/booking/receipt-detail?receiptNumber=${route.query.booking}`
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch receipt details");
+    }
+
+    const data = await response.json();
+
+    if (data.status !== "success" || !data.data) {
+      throw new Error(data.message || "Failed to load receipt data");
+    }
+
+    receiptData.value = data.data;
+  } catch (err) {
+    console.error("Error fetching receipt:", err);
+    error.value = err.message;
+  } finally {
+    isLoading.value = false;
+  }
+}
+
 // Update the onMounted hook
 onMounted(async () => {
   try {

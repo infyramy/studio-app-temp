@@ -8965,7 +8965,255 @@ Payment amount mismatch. Expected: 120, Received: 50
 
 _**Assistant**_
 
-I see the issue. The payment amount mismatch is occurring because the frontend is sending a deposit amount (50) but the backend is calculating the full amount (120). Let me help fix this 
+I see the issue. The payment amount mismatch is occurring because the frontend is sending a deposit amount (50) but the backend is calculating the full amount (120). Let me help fix this by properly handling the payment type (full vs deposit).
+
+Let's modify the payment calculation to account for the payment type:
+
+
+---
+
+_****_
+
+```diff
+        subtotalBeforeAdjustments + datePriceAdjustment + extraPaxCharge;
+  
++     // Calculate the expected payment amount based on payment type
++     const expectedPaymentAmount = body.payment_type === 2 
++       ? themeData.deposit // Use deposit amount if payment type is deposit
++       : paymentTotal;    // Use full amount if payment type is full payment
++ 
+      // Add detailed logging for payment calculation
+      console.log("Payment Calculation Details:", {
+        subtotalBeforeAdjustments,
+        paymentTotal,
++       expectedPaymentAmount,
+        receivedAmount: body.payment_amount,
+-       difference: Math.abs(body.payment_amount - paymentTotal),
++       difference: Math.abs(body.payment_amount - expectedPaymentAmount),
+        paymentType: body.payment_type,
+-       paymentMethod: body.payment_method
++       paymentMethod: body.payment_method,
++       depositAmount: themeData.deposit
+      });
+  
+      // Validate payment amount before proceeding
+-     if (Math.abs(body.payment_amount - paymentTotal) > 0.01) {
++     if (Math.abs(body.payment_amount - expectedPaymentAmount) > 0.01) {
+        console.error("Payment Amount Mismatch:", {
+-         expected: paymentTotal,
++         expected: expectedPaymentAmount,
+          received: body.payment_amount,
+-         difference: Math.abs(body.payment_amount - paymentTotal)
++         difference: Math.abs(body.payment_amount - expectedPaymentAmount),
++         paymentType: body.payment_type === 1 ? 'Full Payment' : 'Deposit',
++         depositAmount: themeData.deposit
+        });
+        throw createError({
+          statusCode: 400,
+-         statusMessage: `Payment amount mismatch. Expected: ${paymentTotal}, Received: ${body.payment_amount}`,
++         statusMessage: `Payment amount mismatch. Expected: ${expectedPaymentAmount}, Received: ${body.payment_amount} (Payment Type: ${body.payment_type === 1 ? 'Full Payment' : 'Deposit'})`,
+        });
+      }
+```
+
+---
+
+_****_
+
+I've updated the payment calculation logic to properly handle both full payment and deposit payment types. Here's what changed:
+
+1. Added a new `expectedPaymentAmount` calculation that:
+   - Uses `themeData.deposit` when `payment_type` is 2 (deposit)
+   - Uses `paymentTotal` when `payment_type` is 1 (full payment)
+
+2. Enhanced the logging to show:
+   - The expected payment amount based on payment type
+   - The deposit amount from the theme
+   - The payment type (Full Payment or Deposit)
+   - The difference between expected and received amounts
+
+3. Updated the validation to compare against the correct expected amount based on payment type
+
+4. Improved the error message to clearly indicate whether it's a full payment or deposit payment
+
+The error you're seeing (Expected: 120, Received: 50) suggests that:
+- The frontend is sending a deposit payment (50)
+- The backend was calculating the full amount (120)
+- Now it will properly validate against the deposit amount when payment_type is 2
+
+Could you try the payment process again? The validation should now work correctly for both full payments and deposits. If you still see any issues, please share the new logs and I'll help you troubleshoot further.
+
+---
+
+_**User**_
+
+Invalid time format: 22:30:00 still happen
+
+---
+
+_**Assistant**_
+
+I see the issue. The time format validation is still failing because we need to normalize the time format before validation. Let me fix this by updating the time validation logic:
+
+
+
+---
+
+_****_
+
+```diff
+  // Validate time format (HH:mm or HH:mm:ss)
+  function isValidTime(timeStr: string): boolean {
+-   // First try HH:mm format
+-   const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
+-   if (timeRegex.test(timeStr)) return true;
++   // First normalize the time string
++   const normalizedTime = normalizeTime(timeStr);
+    
+-   // Then try HH:mm:ss format
+-   const timeWithSecondsRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/;
+-   if (timeWithSecondsRegex.test(timeStr)) {
+-     // If it has seconds, strip them for consistency
+-     return true;
+-   }
+- 
+-   return false;
++   // Then validate the normalized time
++   const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
++   return timeRegex.test(normalizedTime);
+  }
+  
+      }
+  
+-     // Update the time in the request body
++     // Update the time in the request body with normalized format
+      body.time = normalizedTime;
+  
+```
+
+---
+
+_****_
+
+I've simplified and improved the time validation logic:
+
+1. The `normalizeTime` function now:
+   - Takes any time string with hours and minutes
+   - Strips any seconds if present
+   - Returns the time in HH:mm format
+
+2. The `isValidTime` function now:
+   - First normalizes the time string using `normalizeTime`
+   - Then validates the normalized time against the HH:mm format
+   - Returns true only if the normalized time is valid
+
+3. In the main handler:
+   - We normalize the time first
+   - Validate the normalized time
+   - Update the request body with the normalized time format
+
+This change should now properly handle time formats like "22:30:00" by:
+1. Stripping the seconds to get "22:30"
+2. Validating the normalized time
+3. Using the normalized time throughout the rest of the process
+
+The error "Invalid time format: 22:30:00" should no longer occur. Could you try the booking process again with the same time format? It should work now.
+
+If you still encounter any issues, please let me know and I'll help you troubleshoot further.
+
+---
+
+_**User**_
+
+workbox-5ffe50d4.js:1 Uncaught (in promise) non-precached-url: non-precached-url :: [{"url":"/"}]
+    at O.createHandlerBoundToURL (https://test.fotoraya.com/workbox-5ffe50d4.js:1:13245)
+    at Object.createHandlerBoundToURL (https://test.fotoraya.com/workbox-5ffe50d4.js:1:14916)
+    at https://test.fotoraya.com/sw.js:1:3729
+    at https://test.fotoraya.com/sw.js:1:565
+createHandlerBoundToURL @ workbox-5ffe50d4.js:1
+(anonymous) @ workbox-5ffe50d4.js:1
+(anonymous) @ sw.js:1
+(anonymous) @ sw.js:1
+Error with Permissions-Policy header: Unrecognized feature: 'browsing-topics'.
+DCJmY_LS.js:2 Error in component initialization: ReferenceError: fetchReceiptData is not defined
+    at DCJmY_LS.js:2:5124
+
+Error Loading Receipt
+Failed to initialize receipt generation
+
+Retry Loading
+
+when test mode status success on chip, when return got those error
+
+---
+
+_**Assistant**_
+
+I see the issue. The error occurs when returning from a successful CHIP payment. There are two main problems:
+
+1. Service Worker (SW) precaching issue
+2. Missing `fetchReceiptData` function in the receipt component
+
+Let's fix these issues:
+
+1. First, let's check the receipt component:
+
+
+---
+
+_****_
+
+<details>
+            <summary>Searched codebase "receipt component or page that handles receipt data" • **25** results</summary>
+        
+| File | Lines |
+|------|-------|
+| `pages/book-a-session/receipt.vue` | L680-755 |
+| `pages/book-a-session/receipt.vue` | L1025-1100 |
+| `pages/book-a-session/receipt.vue` | L1100-1176 |
+| `pages/book-a-session/receipt-qr/index.vue` | L979-1062 |
+| `pages/book-a-session/receipt.vue` | L39-79 |
+| `pages/book-a-session/receipt.vue` | L259-304 |
+| `pages/book-a-session/receipt.vue` | L357-382 |
+| `pages/book-a-session/receipt-qr/index.vue` | L39-80 |
+| `pages/book-a-session/receipt.vue` | L500-544 |
+| `pages/book-a-session/receipt.vue` | L581-625 |
+| `pages/book-a-session/receipt.vue` | L457-500 |
+| `pages/book-a-session/receipt.vue` | L1-39 |
+| `pages/book-a-session/receipt.vue` | L198-237 |
+| `pages/dashboard/bookings.vue` | L1760-1815 |
+| `pages/book-a-session/receipt.vue` | L304-357 |
+| `pages/book-a-session/receipt.vue` | L544-581 |
+| `server/api/booking/send-receipt.ts` | L66-123 |
+| `pages/dashboard/bookings.vue` | L1725-1760 |
+| `pages/book-a-session/receipt-qr/index.vue` | L762-792 |
+| `pages/book-a-session/receipt.vue` | L237-259 |
+| `pages/book-a-session/failed-payment.vue` | L229-298 |
+| `server/api/booking/send-receipt.ts` | L1-15 |
+| `pages/book-a-session/receipt.vue` | L124-147 |
+| `pages/book-a-session/receipt.vue` | L382-413 |
+| `pages/book-a-session/receipt-qr/index.vue` | L857-914 |
+
+</details>
+
+---
+
+_****_
+
+I see the issue. The receipt component is missing the `fetchReceiptData` function implementation. Let me add it:
+
+
+---
+
+_****_
+
+Cancelled
+
+---
+
+_****_
+
+
 
 ---
 
