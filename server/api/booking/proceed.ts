@@ -507,14 +507,37 @@ export default defineEventHandler(async (event: H3Event) => {
         console.log("CHIP Request Body:", JSON.stringify(chipRequestBody, null, 2));
 
         // Simple fetch request with timeout
-        const response = await fetch("https://gate.chip-in.asia/api/v1/purchases/", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${CHIP_SECRET_KEY.value}`,
-          },
-          body: JSON.stringify(chipRequestBody),
-        });
+        const response = await retry(async () => {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+          
+          try {
+            const res = await fetch("https://gate.chip-in.asia/api/v1/purchases/", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${CHIP_SECRET_KEY.value}`,
+              },
+              body: JSON.stringify(chipRequestBody),
+              signal: controller.signal,
+            });
+            
+            // Check for rate limiting
+            if (res.status === 429) {
+              console.log("Rate limit hit, will retry after delay");
+              throw new Error("Rate limit exceeded");
+            }
+            
+            return res;
+          } catch (err: any) {
+            if (err.name === 'AbortError') {
+              throw new Error('Request timeout');
+            }
+            throw err;
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        }, 3, 5000); // 3 retries with 5 second delay
 
         if (!response.ok) {
           throw new Error(`CHIP API error: ${response.status} ${response.statusText}`);
