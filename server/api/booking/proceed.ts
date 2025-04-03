@@ -364,7 +364,7 @@ export default defineEventHandler(async (event: H3Event) => {
         }
 
         // Validate each payment method
-        const validMethods = methods.filter(method => {
+        const validMethods = methods.filter((method: string) => {
           const isValid = ['fpx', 'credit_card', 'grabpay', 'boost', 'tng'].includes(method.toLowerCase());
           if (!isValid) {
             console.warn(`Invalid payment method found: ${method}`);
@@ -578,6 +578,24 @@ function delay(ms: number): Promise<void> {
 
 function formatWhatsAppMessage(text: string): string {
   return text.replace(/([.!?,])\s+/g, `$1\u200B `);
+}
+
+function formatNumber(number: number): string {
+  return number.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function formatTime(timeStr: string): string {
+  return new Date(`1970-01-01T${timeStr}`).toLocaleTimeString("en-MY", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function formatMalayDate(date: string) {
+  const days = ["Ahad", "Isnin", "Selasa", "Rabu", "Khamis", "Jumaat", "Sabtu"];
+  const d = dayjs(date);
+  return `${days[d.day()]}, ${d.format("DD MMMM YYYY")}`;
 }
 
 async function simulateTyping(
