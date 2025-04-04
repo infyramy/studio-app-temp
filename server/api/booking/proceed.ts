@@ -211,13 +211,14 @@ export default defineEventHandler(async (event: H3Event) => {
     const ip = event.node.req.headers['x-forwarded-for'] || event.node.req.socket.remoteAddress;
     const rateLimitKey = `booking:${ip}`;
     const rateLimit = await useStorage().getItem(rateLimitKey);
-    if (rateLimit && Number(rateLimit) > 5) { // 5 requests per minute
+    if (rateLimit && Number(rateLimit) > 15) { // Increased from 5 to 15 requests
       throw createError({
         statusCode: 429,
         statusMessage: "Too many requests. Please try again later.",
       });
     }
-    await useStorage().setItem(rateLimitKey, String((Number(rateLimit) || 0) + 1));
+    // Set the rate limit with a 1-minute expiration
+    await useStorage().setItem(rateLimitKey, String((Number(rateLimit) || 0) + 1), { ttl: 60 });
 
     // Validate the request
     if (!body.date || !body.time || !body.theme || !body.name || !body.email || !body.phone) {
