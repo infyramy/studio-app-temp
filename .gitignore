@@ -25,3 +25,8 @@ logs
 
 # Tokens
 server/tokens.json
+
+# SpecStory - conversation history with secrets
+.specstory/
+.specstory/history/2025-04-03_16-26-payment-gateway-issues-and-notifications.md
+.specstory/history/2025-04-03_16-26-payment-gateway-issues-and-notifications.md
