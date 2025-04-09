@@ -2293,7 +2293,7 @@ const calendarDays = computed(() => {
     // Add all dates, but mark them as selectable based on our conditions
     days.push({
       date: dateStr,
-      isSelectable: isToday || isSelectable, // Make sure today is always selectable if not a holiday
+      isSelectable: isSelectable, // Remove the isToday override to respect holiday status
       isToday,
       isHoliday,
     });
